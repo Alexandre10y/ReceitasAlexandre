@@ -51,21 +51,21 @@ export default function WarrantyAndLossesView({
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-            Garantias Cobertas & Controle de Perdas
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+            Garantias
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-            Saiba exatamente quanto perdeu ou investiu em garantias, em qual cliente e onde foi coberto
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Quanto saiu do seu bolso em garantia, de quem e onde foi coberto
           </p>
         </div>
 
         <button
           type="button"
           onClick={() => setShowModal(true)}
-          className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm shadow-sm transition active:scale-95"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-sm transition active:scale-95"
         >
           <Plus className="w-4 h-4" />
-          Registrar Garantia / Perda
+          Registrar garantia
         </button>
       </div>
 

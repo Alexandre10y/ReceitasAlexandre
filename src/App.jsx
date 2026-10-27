@@ -657,11 +657,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
+    <div className="min-h-screen flex flex-col lg:flex-row bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
       {/* Sidebar Desktop */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-30">
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800 z-30">
         <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-black text-lg shadow-md">
+          <div className="w-10 h-10 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center font-black text-lg">
             AS
           </div>
           <div>
@@ -696,7 +696,7 @@ export default function App() {
                 onClick={() => setActiveTab(item.id)}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-xs font-bold transition ${
                   active
-                    ? 'bg-indigo-600/10 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400'
+                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/60'
                 }`}
               >
@@ -742,9 +742,9 @@ export default function App() {
 
       {/* Conteúdo Principal */}
       <div className="flex-1 lg:pl-64 flex flex-col min-h-screen pb-32 lg:pb-8">
-        <header className="sticky top-0 z-20 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between">
+        <header className="sticky top-0 z-20 bg-white/90 dark:bg-slate-950/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="lg:hidden w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-black text-sm">
+            <div className="lg:hidden w-9 h-9 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center font-black text-sm">
               AS
             </div>
             <div>
@@ -868,14 +868,14 @@ export default function App() {
       <button
         type="button"
         onClick={() => setIsGeminiLiveOpen(true)}
-        className="fixed bottom-20 lg:bottom-6 right-4 sm:right-6 z-40 inline-flex items-center gap-2.5 px-4 py-3.5 rounded-full bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-xs sm:text-sm shadow-2xl shadow-indigo-500/40 ring-2 ring-white/25 transition active:scale-95"
+        className="fixed bottom-24 lg:bottom-6 right-4 sm:right-6 z-40 inline-flex items-center gap-2 px-4 py-3 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-xs sm:text-sm shadow-xl transition active:scale-95"
       >
         <Mic className="w-4 h-4" />
         <span className="hidden sm:inline">Falar</span>
       </button>
 
       {/* Barra de Navegação Inferior para Celular */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 py-1.5 px-1">
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 grid grid-cols-5 py-1.5 px-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = activeTab === item.id;
@@ -886,7 +886,7 @@ export default function App() {
               onClick={() => setActiveTab(item.id)}
               className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition ${
                 active
-                  ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                  ? 'text-slate-900 dark:text-white font-bold bg-slate-100 dark:bg-slate-800'
                   : 'text-slate-500 dark:text-slate-400'
               }`}
             >

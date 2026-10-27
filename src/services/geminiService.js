@@ -417,78 +417,260 @@ export const smartLocalAutoFill = (rawQuery) => {
   };
 };
 
-// Chamada à API Gemini tentando tanto a chave principal quanto a chave do projeto 822788849308
+// Lista de segurança; a lista real é descoberta na API (ListModels) para não envelhecer.
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+const modelCache = new Map();
+
+const modelVersion = (name) => {
+  const match = name.match(/gemini-(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : 0;
+};
+
+// Descobre os modelos "flash" disponíveis para a chave, do mais novo para o mais antigo.
+const discoverModels = async (key) => {
+  if (modelCache.has(key)) return modelCache.get(key);
+  let discovered = [];
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(key)}`
+    );
+    if (response.ok) {
+      const data = await response.json();
+      discovered = (data?.models || [])
+        .map((model) => String(model.name || '').replace(/^models\//, ''))
+        .filter((name) => /^gemini-\d/.test(name) && name.includes('flash'))
+        .filter((name) => !/(lite|image|tts|live|audio|embedding|thinking|exp|preview|native)/i.test(name))
+        .filter((name, index, list) => list.indexOf(name) === index)
+        .sort((a, b) => modelVersion(b) - modelVersion(a) || a.length - b.length);
+    }
+  } catch {
+    discovered = [];
+  }
+  const ordered = [...discovered, ...GEMINI_MODELS].filter((name, index, list) => list.indexOf(name) === index);
+  modelCache.set(key, ordered);
+  return ordered;
+};
+
+// Detecta se o texto parece um código (service tag, part number, SNID, modelo Apple A####, etc.)
+const looksLikeCode = (text) => {
+  const tokens = String(text || '')
+    .split(/[\s,;/]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const compact = tokens.join('');
+  if (tokens.length === 1 && /^[A-Z0-9]{7}$/i.test(compact)) return 'service tag Dell (7 caracteres)';
+  if (/^\d{11,12}$/.test(compact)) return 'SNID Acer';
+  for (const token of tokens) {
+    if (/^A\d{4}$/i.test(token)) return 'número de modelo Apple (A####)';
+    const digits = (token.match(/\d/g) || []).length;
+    const letters = (token.match(/[A-Z]/gi) || []).length;
+    // Ex: 82MD0007BR, PE08DCC1, AN515-57, NX.K6SAL.004, i3520-5810BLK
+    if (token.length >= 6 && token.length <= 16 && digits >= 2 && letters >= 2 && /^[A-Z0-9.\-]+$/i.test(token)) {
+      return 'part number / código do modelo';
+    }
+  }
+  return null;
+};
+
+const extractJson = (rawText) => {
+  if (!rawText) return null;
+  let text = rawText.trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) text = fenced[1].trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+};
+
+const buildSpecsPrompt = (queryText, codeHint) => `Você é um técnico especialista em notebooks, celulares e hardware que trabalha para a loja All System (Brasil).
+Tarefa: identificar EXATAMENTE o produto abaixo e devolver a ficha técnica real dele, usando a busca na web.
+
+Entrada do usuário: "${queryText}"
+${codeHint ? `Atenção: a entrada parece ser um ${codeHint}. Primeiro descubra a qual modelo exato esse código pertence (pesquise o código entre aspas, junto com palavras como "specs", "especificações", "support", "service tag", "part number"). Só depois busque a ficha.` : 'Se a entrada tiver um código de modelo (ex: 3520, 82MD0007BR, A515-57, NX.K6SAL.004, i1135-A30P), pesquise esse código exato, não um modelo parecido.'}
+
+Regras:
+1. Não invente. Se um campo não for encontrado com segurança, use null. Prefira deixar null do que chutar.
+2. Quando o modelo existir em várias configurações, informe a configuração mais comum e descreva as variações em "variants".
+3. "matchedModel" deve ser o nome oficial completo do fabricante (ex: "Dell Inspiron 15 3520 (i3520-5810BLK)", "Lenovo IdeaPad 3 15ALC6 82MD").
+4. "confidence": "alta" se achou a página oficial ou ficha completa do modelo exato; "media" se achou o modelo mas não a configuração exata; "baixa" se não conseguiu identificar.
+5. Preços em reais (números inteiros): "costPrice" = quanto um seminovo desse modelo costa hoje no Brasil (OLX, Mercado Livre usados); "salePrice" = preço de venda sugerido com ~40% a 60% de margem sobre o custo. Se não souber, use null.
+6. Responda APENAS com o JSON abaixo, sem texto antes ou depois, sem markdown.
+
+{
+  "matchedModel": "nome oficial completo ou null",
+  "confidence": "alta | media | baixa",
+  "name": "título comercial curto para anúncio (marca, linha, processador, RAM, SSD)",
+  "category": "Notebooks | Notebooks Gamer | Smartphones | Apple / MacBooks | Hardware & Upgrades | Periféricos | Outros",
+  "processor": "modelo exato (ex: Intel Core i5-1235U) ou null",
+  "ram": "ex: 8GB DDR4 3200MHz (expansível até 16GB) ou null",
+  "storage": "ex: 256GB SSD NVMe M.2 ou null",
+  "screen": "ex: 15.6\\" Full HD (1920x1080) WVA 120Hz ou null",
+  "gpu": "ex: Intel Iris Xe Graphics ou null",
+  "releaseYear": 2022,
+  "variants": "resumo curto das variações de configuração ou null",
+  "condition": "Seminovo / Revisado",
+  "costPrice": 2200,
+  "salePrice": 3300,
+  "warrantyMonths": 6,
+  "notes": "2 frases comerciais com os pontos fortes reais do modelo"
+}`;
+
+const normalizeSpecs = (parsed, queryText, sources) => {
+  const clean = (value) => (value === null || value === undefined || value === 'null' || value === 'N/A' ? '' : String(value));
+  const confidence = ['alta', 'media', 'baixa'].includes(parsed.confidence) ? parsed.confidence : 'media';
+  return {
+    sku: `AS-${Math.floor(100 + Math.random() * 900)}`,
+    name: clean(parsed.name) || clean(parsed.matchedModel) || queryText,
+    matchedModel: clean(parsed.matchedModel),
+    category: clean(parsed.category) || 'Notebooks',
+    processor: clean(parsed.processor),
+    ram: clean(parsed.ram),
+    storage: clean(parsed.storage),
+    screen: clean(parsed.screen),
+    gpu: clean(parsed.gpu),
+    releaseYear: Number(parsed.releaseYear) || null,
+    variants: clean(parsed.variants),
+    condition: clean(parsed.condition) || 'Seminovo / Revisado',
+    costPrice: Number(parsed.costPrice) || 0,
+    salePrice: Number(parsed.salePrice) || 0,
+    warrantyMonths: Number(parsed.warrantyMonths) || 6,
+    notes: clean(parsed.notes),
+    confidence,
+    sources,
+    source: 'gemini',
+    error: '',
+  };
+};
+
+const extractSources = (data) => {
+  const chunks = data?.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+  const seen = new Set();
+  const list = [];
+  for (const chunk of chunks) {
+    const uri = chunk?.web?.uri;
+    if (!uri || seen.has(uri)) continue;
+    seen.add(uri);
+    list.push({ uri, title: chunk?.web?.title || uri });
+    if (list.length >= 5) break;
+  }
+  return list;
+};
+
+// Busca ficha técnica real com Gemini + Google Search.
+// Nunca disfarça o fallback local: `source` é 'gemini' ou 'local', e `error` diz por que caiu no local.
 export const fetchProductSpecsWithGemini = async (queryText) => {
+  const query = (queryText || '').trim();
   const primaryKey = getGeminiApiKey();
   const keysToTry = Array.from(
     new Set([primaryKey, DEFAULT_GEMINI_CONFIG.firebaseProjectApiKey].filter(Boolean))
   );
+  const codeHint = looksLikeCode(query);
+  const prompt = buildSpecsPrompt(query, codeHint);
+  const errors = [];
+  const noteError = (message) => {
+    const short = String(message || '').replace(/\s+/g, ' ').trim();
+    if (short && !errors.includes(short)) errors.push(short);
+  };
 
-  const prompt = `Você é o assistente especialista de compras e vendas da empresa All System (Alexandre Beroni) no Brasil.
-O usuário digitou ou falou o seguinte produto/modelo para cadastrar no sistema: "${queryText}".
-Busque as especificações técnicas reais desse modelo e retorne APENAS um JSON válido (sem blocos markdown) com a seguinte estrutura exata:
-{
-  "name": "Nome comercial completo e profissional do produto",
-  "category": "Categoria (ex: Notebooks, Smartphones, Hardware, Periféricos)",
-  "processor": "Modelo exato do processador (ex: Intel Core i5-1235U, Ryzen 5 5500U, Apple A15)",
-  "ram": "Memória RAM padrão deste modelo (ex: 8GB DDR4 3200MHz ou 16GB DDR4)",
-  "storage": "Armazenamento em Gigas/TB e tipo (ex: 512GB SSD NVMe M.2)",
-  "screen": "Tamanho e resolução da tela (ex: 15.6 polegadas Full HD IPS)",
-  "gpu": "Placa de vídeo integrada ou dedicada",
-  "condition": "Seminovo / Revisado ou Novo",
-  "costPrice": numero_inteiro_custo_estimado_em_reais_no_brasil,
-  "salePrice": numero_inteiro_preco_venda_sugerido_em_reais_com_margem,
-  "warrantyMonths": 6,
-  "notes": "Resumo comercial curto destacando pontos fortes e sugestão de venda parcelada em 10x"
-}`;
+  const callModel = async (key, model, useSearch) => {
+    const body = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.2 },
+    };
+    if (useSearch) body.tools = [{ google_search: {} }];
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    );
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = (await response.json())?.error?.message || '';
+      } catch {
+        detail = '';
+      }
+      return { ok: false, status: response.status, detail };
+    }
+    return { ok: true, status: 200, data: await response.json() };
+  };
 
-  for (const key of keysToTry) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
-          key
-        )}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            tools: [{ google_search: {} }],
-          }),
-        }
-      );
+  const describe = (status, detail, model) => {
+    const modelProblem = /model|not found|no longer available|not supported/i.test(detail);
+    if (status === 403) return 'a chave não tem permissão para a API do Gemini (bloqueada ou sem a Generative Language API ativada)';
+    if (status === 429) return 'cota esgotada por agora (limite gratuito do Gemini)';
+    if (modelProblem) return `modelo ${model} indisponível`;
+    if (status === 400) return 'chave inválida ou pedido recusado';
+    return detail || `erro HTTP ${status}`;
+  };
 
-      if (response.ok) {
-        const data = await response.json();
-        const rawText =
-          data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n') || '';
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return {
-            sku: `AS-${Math.floor(100 + Math.random() * 900)}`,
-            name: parsed.name || queryText,
-            category: parsed.category || 'Notebooks',
-            processor: parsed.processor || 'N/A',
-            ram: parsed.ram || '8GB',
-            storage: parsed.storage || '256GB SSD',
-            screen: parsed.screen || '15.6" Full HD',
-            gpu: parsed.gpu || 'Integrada',
-            condition: parsed.condition || 'Seminovo / Revisado',
-            costPrice: Number(parsed.costPrice) || 1800,
-            salePrice: Number(parsed.salePrice) || 2970,
-            warrantyMonths: Number(parsed.warrantyMonths) || 6,
-            notes: parsed.notes || '',
-            source: 'API CONEXÃO DE NOTEBOOK (Gemini Web Search)',
-          };
+  for (const [keyIndex, key] of keysToTry.entries()) {
+    const keyLabel = keyIndex === 0 ? 'chave principal' : 'chave reserva';
+    const models = (await discoverModels(key)).slice(0, 3);
+    let keyBlocked = false;
+    for (const model of models) {
+      if (keyBlocked) break;
+      // 1ª tentativa com busca Google; se a cota de busca estourar (429), tenta sem busca.
+      for (const useSearch of [true, false]) {
+        try {
+          const result = await callModel(key, model, useSearch);
+          if (!result.ok) {
+            noteError(`${keyLabel}: ${describe(result.status, result.detail, model)}${useSearch ? '' : ' (mesmo sem busca)'}`);
+            if (result.status === 403) {
+              keyBlocked = true; // problema é da chave, não adianta trocar de modelo
+              break;
+            }
+            if (result.status === 429) continue; // tenta o mesmo modelo sem busca
+            break; // modelo indisponível → próximo modelo
+          }
+          const rawText = result.data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('\n') || '';
+          const parsed = extractJson(rawText);
+          if (!parsed) {
+            noteError(`${model}: resposta veio sem ficha legível`);
+            break;
+          }
+          const specs = normalizeSpecs(parsed, query, extractSources(result.data));
+          specs.grounded = useSearch;
+          if (!useSearch && specs.confidence === 'alta') specs.confidence = 'media';
+          return specs;
+        } catch (err) {
+          noteError(`${keyLabel}: ${err?.message || 'falha de rede'}`);
+          break;
         }
       }
-    } catch {
-      // Continua para o fallback inteligente
     }
   }
 
-  return smartLocalAutoFill(queryText);
+  // Sem web não dá para descobrir o modelo a partir de um código: melhor deixar em branco do que chutar.
+  const local = codeHint
+    ? {
+        sku: `AS-${Math.floor(100 + Math.random() * 900)}`,
+        name: query,
+        category: 'Notebooks',
+        processor: '',
+        ram: '',
+        storage: '',
+        screen: '',
+        gpu: '',
+        condition: 'Seminovo / Revisado',
+        costPrice: 0,
+        salePrice: 0,
+        warrantyMonths: 6,
+        notes: '',
+      }
+    : smartLocalAutoFill(query);
+  return {
+    ...local,
+    matchedModel: '',
+    confidence: 'baixa',
+    sources: [],
+    source: 'local',
+    error: errors.slice(0, 2).join(' · ') || 'Sem resposta da API',
+  };
 };
 
 // Gerador de Post Comercial para WhatsApp Status / Instagram (Como visto no AI Studio!)

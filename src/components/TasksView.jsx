@@ -28,8 +28,8 @@ export default function TasksView({ tasks, onAddTask, onToggleTask, onDeleteTask
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-          Tarefas do Alexandre • Rotina All System
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
+          Tarefas
         </h1>
         <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
           Organize suas cobranças de parcelas, cotações de produtos, garantias e metas do dia
@@ -82,7 +82,7 @@ export default function TasksView({ tasks, onAddTask, onToggleTask, onDeleteTask
 
           <button
             type="submit"
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 transition"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-xs font-bold shrink-0 transition"
           >
             <Plus className="w-4 h-4" />
             Adicionar

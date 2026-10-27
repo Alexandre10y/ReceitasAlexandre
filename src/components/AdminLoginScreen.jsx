@@ -74,7 +74,7 @@ export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDar
 
       <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 sm:p-8 space-y-6">
         <div className="flex flex-col items-center text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600 flex items-center justify-center text-white font-black text-2xl shadow-lg">
+          <div className="w-14 h-14 rounded-2xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 flex items-center justify-center font-black text-2xl">
             AS
           </div>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
@@ -154,7 +154,7 @@ export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDar
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-sm shadow-lg transition active:scale-95 disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-extrabold text-sm transition active:scale-95 disabled:opacity-60"
           >
             <Lock className="w-4 h-4" />
             {loading ? 'Entrando...' : 'Entrar como Administrador'}

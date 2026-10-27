@@ -339,6 +339,8 @@ export const computeFinance = (sales, options = {}) => {
         openSum: money.openSum,
         next: money.nextOpen,
         seal: money.seal,
+        hasWarning: money.hasWarning,
+        overdueCount: money.overdueInst.length,
       });
     }
 

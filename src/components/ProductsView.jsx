@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Package,
   Plus,
   Search,
   Flame,
@@ -12,20 +11,81 @@ import {
   Cpu,
   HardDrive,
   Monitor,
-  Layers,
+  MemoryStick,
   Loader2,
   KeyRound,
   CheckCircle2,
+  AlertTriangle,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import { formatCurrency, formatPercent } from '../utils/formatters';
 import { inventorySnapshot } from '../utils/finance';
-import {
-  fetchProductSpecsWithGemini,
-  PRODUCT_PROTOTYPES,
-  getGeminiApiKey,
-  saveGeminiApiKey,
-  DEFAULT_GEMINI_CONFIG,
-} from '../services/geminiService';
+import { fetchProductSpecsWithGemini, getGeminiApiKey, saveGeminiApiKey } from '../services/geminiService';
+
+const CATEGORIES = ['Notebooks', 'Notebooks Gamer', 'Smartphones', 'Apple / MacBooks', 'Hardware & Upgrades', 'Periféricos', 'Outros'];
+const CONDITIONS = ['Seminovo / Revisado', 'Seminovo Premium', 'Novo Lacrado', 'Usado com marcas', 'Para peças'];
+const QUICK_MODELS = ['Dell Inspiron 15 3520 i5', 'Lenovo IdeaPad 3 82MD', 'Acer Nitro 5 AN515-57', 'Samsung Galaxy Book2', 'MacBook Air M1 A2337', 'iPhone 13 128GB'];
+
+const input =
+  'w-full px-3 py-2.5 text-sm rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500 placeholder:text-slate-400';
+const labelCls = 'block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1';
+
+const emptyForm = () => ({
+  sku: `AS-${Math.floor(100 + Math.random() * 900)}`,
+  name: '',
+  category: 'Notebooks',
+  processor: '',
+  ram: '',
+  storage: '',
+  screen: '',
+  gpu: '',
+  condition: 'Seminovo / Revisado',
+  costPrice: '',
+  salePrice: '',
+  stock: 1,
+  totalPurchased: 1,
+  totalSold: 0,
+  searchCount: 0,
+  supplier: '',
+  warrantyMonths: 6,
+  notes: '',
+});
+
+function Section({ step, title, hint, children }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <header className="flex items-center gap-3 px-4 py-2.5 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <span className="w-6 h-6 rounded-full bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-[11px] font-extrabold inline-flex items-center justify-center">
+          {step}
+        </span>
+        <div className="min-w-0">
+          <h4 className="text-sm font-extrabold leading-tight">{title}</h4>
+          {hint && <p className="text-[11px] text-slate-500 leading-tight">{hint}</p>}
+        </div>
+      </header>
+      <div className="p-4 bg-white dark:bg-slate-950">{children}</div>
+    </section>
+  );
+}
+
+function SpecField({ icon: Icon, label, value, onChange, placeholder }) {
+  return (
+    <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2.5 focus-within:ring-2 focus-within:ring-slate-400 dark:focus-within:ring-slate-500 bg-white dark:bg-slate-900">
+      <Icon className="w-4 h-4 mt-1 text-slate-400 shrink-0" />
+      <span className="flex-1 min-w-0">
+        <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</span>
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className="w-full bg-transparent text-sm font-semibold focus:outline-none placeholder:font-normal placeholder:text-slate-400"
+        />
+      </span>
+    </label>
+  );
+}
 
 export default function ProductsView({
   products,
@@ -41,133 +101,91 @@ export default function ProductsView({
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [restockProduct, setRestockProduct] = useState(null);
-  const [restockQty, setRestockQty] = useState(5);
+  const [restockQty, setRestockQty] = useState(2);
   const [restockCost, setRestockCost] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(null);
 
-  // Estados da Integração Gemini IA
-  const [quickAiModelInput, setQuickAiModelInput] = useState('');
+  const [quickQuery, setQuickQuery] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiStatusBanner, setAiStatusBanner] = useState('');
+  const [aiResult, setAiResult] = useState(null); // { source, confidence, matchedModel, sources, error, variants, query }
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [geminiKeyInput, setGeminiKeyInput] = useState(() => getGeminiApiKey());
 
-  const [form, setForm] = useState({
-    sku: '',
-    name: '',
-    category: 'Notebooks',
-    processor: '',
-    ram: '',
-    storage: '',
-    screen: '',
-    gpu: '',
-    condition: 'Seminovo / Revisado',
-    costPrice: '',
-    salePrice: '',
-    stock: 1,
-    totalPurchased: 1,
-    totalSold: 0,
-    searchCount: 1,
-    supplier: '',
-    warrantyMonths: 6,
-    notes: '',
-  });
+  const [form, setForm] = useState(emptyForm);
 
-  const openCreateModal = () => {
+  const openCreateModal = (prefillName = '') => {
     setEditingProduct(null);
-    setAiStatusBanner('');
-    setForm({
-      sku: `AS-${Math.floor(100 + Math.random() * 900)}`,
-      name: '',
-      category: 'Notebooks',
-      processor: '',
-      ram: '',
-      storage: '',
-      screen: '',
-      gpu: '',
-      condition: 'Seminovo / Revisado',
-      costPrice: '',
-      salePrice: '',
-      stock: 1,
-      totalPurchased: 1,
-      totalSold: 0,
-      searchCount: 1,
-      supplier: '',
-      warrantyMonths: 6,
-      notes: '',
-    });
+    setAiResult(null);
+    setForm({ ...emptyForm(), name: prefillName });
     setShowModal(true);
   };
 
   const openEditModal = (product) => {
     setEditingProduct(product);
-    setAiStatusBanner('');
+    setAiResult(null);
     setForm({
-      sku: product.sku || '',
-      name: product.name || '',
-      category: product.category || 'Notebooks',
-      processor: product.processor || '',
-      ram: product.ram || '',
-      storage: product.storage || '',
-      screen: product.screen || '',
-      gpu: product.gpu || '',
-      condition: product.condition || 'Seminovo / Revisado',
+      ...emptyForm(),
+      ...product,
       costPrice: product.costPrice ?? '',
       salePrice: product.salePrice ?? '',
       stock: product.stock ?? 0,
       totalPurchased: product.totalPurchased ?? 0,
       totalSold: product.totalSold ?? 0,
       searchCount: product.searchCount ?? 0,
-      supplier: product.supplier || '',
       warrantyMonths: product.warrantyMonths ?? 6,
-      notes: product.notes || '',
     });
     setShowModal(true);
   };
 
-  // Autopreenchimento com Gemini IA (funciona na barra rápida da página ou dentro do modal!)
-  const handleAutoFillWithGemini = async (queryToUse, openModalIfClosed = false) => {
+  const runAutoFill = async (queryToUse, openModalIfClosed = false) => {
     const query = (queryToUse || form.name || '').trim();
     if (!query) return;
-
     setIsAiLoading(true);
-    setAiStatusBanner('Consultando especificações técnicas e preços com Gemini IA...');
-
+    if (openModalIfClosed) {
+      setEditingProduct(null);
+      setForm({ ...emptyForm(), name: query });
+      setAiResult(null);
+      setShowModal(true);
+    }
     try {
       const specs = await fetchProductSpecsWithGemini(query);
       setForm((prev) => ({
         ...prev,
         sku: prev.sku || specs.sku,
-        name: specs.name,
-        category: specs.category,
-        processor: specs.processor,
-        ram: specs.ram,
-        storage: specs.storage,
-        screen: specs.screen,
-        gpu: specs.gpu,
-        condition: specs.condition || 'Seminovo / Revisado',
-        costPrice: specs.costPrice,
-        salePrice: specs.salePrice,
-        warrantyMonths: specs.warrantyMonths || 6,
-        notes: specs.notes,
+        name: specs.name || prev.name,
+        category: specs.category || prev.category,
+        processor: specs.processor || '',
+        ram: specs.ram || '',
+        storage: specs.storage || '',
+        screen: specs.screen || '',
+        gpu: specs.gpu || '',
+        condition: specs.condition || prev.condition,
+        costPrice: specs.costPrice || prev.costPrice,
+        salePrice: specs.salePrice || prev.salePrice,
+        warrantyMonths: specs.warrantyMonths || prev.warrantyMonths,
+        notes: specs.notes || prev.notes,
       }));
-      setAiStatusBanner(
-        `✨ Ficha preenchida automaticamente via ${specs.source}: Processador, RAM, Gigas e sugestão de preço prontos!`
-      );
-      if (openModalIfClosed) {
-        setEditingProduct(null);
-        setShowModal(true);
-      }
+      setAiResult({
+        query,
+        source: specs.source,
+        confidence: specs.confidence,
+        matchedModel: specs.matchedModel,
+        sources: specs.sources || [],
+        error: specs.error || '',
+        variants: specs.variants || '',
+        grounded: specs.grounded !== false,
+      });
     } finally {
       setIsAiLoading(false);
     }
   };
 
-  const handleSave = (e) => {
-    e.preventDefault();
+  const handleSave = (event) => {
+    event.preventDefault();
     if (!form.name.trim()) return;
-
     const payload = {
       ...form,
+      name: form.name.trim(),
       costPrice: Number(form.costPrice) || 0,
       salePrice: Number(form.salePrice) || 0,
       stock: Number(form.stock) || 0,
@@ -176,49 +194,38 @@ export default function ProductsView({
       searchCount: Number(form.searchCount) || 0,
       warrantyMonths: Number(form.warrantyMonths) || 6,
     };
-
-    if (editingProduct) {
-      onUpdateProduct({ ...editingProduct, ...payload });
-    } else {
-      onAddProduct(payload);
-    }
+    if (editingProduct) onUpdateProduct({ ...editingProduct, ...payload });
+    else onAddProduct(payload);
     setShowModal(false);
-    setQuickAiModelInput('');
+    setQuickQuery('');
   };
 
-  const handleConfirmRestock = (e) => {
-    e.preventDefault();
+  const handleConfirmRestock = (event) => {
+    event.preventDefault();
     if (!restockProduct || Number(restockQty) <= 0) return;
-    onRegisterPurchase(
-      restockProduct.id,
-      Number(restockQty),
-      restockCost !== '' ? Number(restockCost) : restockProduct.costPrice
-    );
+    onRegisterPurchase(restockProduct.id, Number(restockQty), restockCost !== '' ? Number(restockCost) : restockProduct.costPrice);
     setRestockProduct(null);
   };
 
-  const handleSaveGeminiKey = (e) => {
-    e.preventDefault();
+  const handleSaveGeminiKey = (event) => {
+    event.preventDefault();
     saveGeminiApiKey(geminiKeyInput);
     setShowApiKeyModal(false);
   };
 
-  // Filtragem e Ordenação
+  const term = search.toLowerCase();
   const filtered = products
     .filter(
       (p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        (p.sku || '').toLowerCase().includes(search.toLowerCase()) ||
-        (p.processor || '').toLowerCase().includes(search.toLowerCase()) ||
-        (p.category || '').toLowerCase().includes(search.toLowerCase())
+        p.name.toLowerCase().includes(term) ||
+        (p.sku || '').toLowerCase().includes(term) ||
+        (p.processor || '').toLowerCase().includes(term) ||
+        (p.category || '').toLowerCase().includes(term)
     )
     .sort((a, b) => {
       if (sortBy === 'most_sold') return b.totalSold - a.totalSold;
       if (sortBy === 'most_searched') return b.searchCount - a.searchCount;
-      if (sortBy === 'most_purchased') return b.totalPurchased - a.totalPurchased;
-      if (sortBy === 'highest_margin') {
-        return b.salePrice - b.costPrice - (a.salePrice - a.costPrice);
-      }
+      if (sortBy === 'highest_margin') return b.salePrice - b.costPrice - (a.salePrice - a.costPrice);
       if (sortBy === 'low_stock') return a.stock - b.stock;
       return 0;
     });
@@ -228,142 +235,106 @@ export default function ProductsView({
     .filter((product) => Number(product.searchCount) > 0)
     .sort((a, b) => Number(b.searchCount) - Number(a.searchCount));
 
+  const formCost = Number(form.costPrice) || 0;
+  const formSale = Number(form.salePrice) || 0;
+  const formProfit = formSale - formCost;
+  const formMargin = formSale > 0 ? (formProfit / formSale) * 100 : 0;
+
+  const confidenceLabel = { alta: 'Confiança alta', media: 'Confiança média', baixa: 'Confiança baixa' };
+
   return (
-    <div className="space-y-6">
-      {/* Cabeçalho */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-5 max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-            Produtos, Notebooks & Autopreenchimento Gemini IA
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-            Conectado: <strong>{DEFAULT_GEMINI_CONFIG.keyName}</strong> ({DEFAULT_GEMINI_CONFIG.projectName})
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Produtos</h1>
+          <p className="text-sm text-slate-500">
+            {products.length} {products.length === 1 ? 'cadastrado' : 'cadastrados'} · custo parado {formatCurrency(stock.cost)}
           </p>
         </div>
-
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setShowApiKeyModal(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-3 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 font-bold text-xs transition"
-            title="API CONEXÃO DE NOTEBOOK Ativa"
+            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            title="Chave da API Gemini"
           >
-            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-            <span>{DEFAULT_GEMINI_CONFIG.keyName} Ativa</span>
+            <KeyRound className="w-4 h-4" />
           </button>
-
           <button
             type="button"
-            onClick={openCreateModal}
-            className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-sm transition active:scale-95"
+            onClick={() => openCreateModal()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-sm"
           >
             <Plus className="w-4 h-4" />
-            Cadastrar Produto
+            Cadastrar
           </button>
         </div>
       </div>
 
-      {/* BARRA DE CADASTRO MÁGICO COM GEMINI IA */}
-      <div className="bg-gradient-to-r from-indigo-600/10 via-violet-600/10 to-fuchsia-600/10 dark:from-indigo-950/60 dark:via-violet-950/50 dark:to-slate-900 p-4 sm:p-5 rounded-3xl border border-indigo-500/30 shadow-sm space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-indigo-600 text-white">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white">
-                Protótipo Automático com Gemini IA (Zero Digitação Braçal)
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
-                Escreva o modelo (ex: <em>"Dell Inspiron 15 i5"</em>, <em>"Acer Nitro 5"</em>, <em>"Lenovo IdeaPad"</em>, <em>"iPhone 13 Pro Max"</em>) e ele puxa Processador, RAM, SSD/Gigas, Tela e Preços automaticamente:
-              </p>
-            </div>
-          </div>
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-slate-500" />
+          <h3 className="text-sm font-extrabold">Cadastro rápido pela ficha do modelo</h3>
         </div>
-
         <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleAutoFillWithGemini(quickAiModelInput, true);
+          onSubmit={(event) => {
+            event.preventDefault();
+            runAutoFill(quickQuery, true);
           }}
-          className="flex flex-col sm:flex-row gap-2.5"
+          className="flex flex-col sm:flex-row gap-2"
         >
           <input
             type="text"
-            value={quickAiModelInput}
-            onChange={(e) => setQuickAiModelInput(e.target.value)}
-            placeholder="Digite o modelo aqui... Ex: Notebook Dell Inspiron i5 16GB 512GB ou Acer Nitro 5"
-            className="flex-1 px-4 py-3 text-sm rounded-2xl bg-white dark:bg-slate-900 border border-indigo-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            value={quickQuery}
+            onChange={(event) => setQuickQuery(event.target.value)}
+            placeholder="Modelo, part number ou service tag — ex: Inspiron 3520, 82MD0007BR, A2337, JX9K2L3"
+            className={input}
           />
           <button
             type="submit"
-            disabled={isAiLoading || !quickAiModelInput.trim()}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 text-white font-bold text-xs sm:text-sm shadow-md transition"
+            disabled={isAiLoading || !quickQuery.trim()}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-sm shrink-0 disabled:opacity-50"
           >
-            {isAiLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Buscando Ficha Técnica...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Preencher Protótipo com IA
-              </>
-            )}
+            {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+            Buscar ficha
           </button>
         </form>
-
-        {/* Atalhos de 1 Clique para Modelos Muito Usados */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1">
-            Protótipos em 1 clique:
-          </span>
-          {[
-            'Dell Inspiron 15 i5',
-            'Dell Latitude i7',
-            'Acer Nitro 5 RTX 3050',
-            'Lenovo IdeaPad Ryzen 5',
-            'ThinkPad T14 i5',
-            'Samsung Galaxy Book i5',
-            'MacBook Air M1',
-            'iPhone 13 Pro Max',
-            'iPhone 11 128GB',
-          ].map((preset) => (
+        <div className="flex flex-wrap gap-1.5">
+          {QUICK_MODELS.map((preset) => (
             <button
               key={preset}
               type="button"
               onClick={() => {
-                setQuickAiModelInput(preset);
-                handleAutoFillWithGemini(preset, true);
+                setQuickQuery(preset);
+                runAutoFill(preset, true);
               }}
-              className="px-2.5 py-1 rounded-xl text-[11px] font-semibold bg-white/80 dark:bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
+              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700"
             >
               {preset}
             </button>
           ))}
         </div>
+        <p className="text-[11px] text-slate-500">
+          Quanto mais exato o código, melhor: a etiqueta embaixo do notebook (service tag, part number, S/N) acerta muito mais do que só "Dell i5".
+        </p>
       </div>
 
-      {/* Filtros Rápidos */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por modelo, processador, memória RAM ou código..."
-            className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar no estoque"
+            className={`${input} pl-10`}
           />
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {[
             { id: 'default', label: 'Todos' },
             { id: 'most_sold', label: 'Mais vendidos' },
-            { id: 'most_searched', label: 'Mais buscados' },
-            { id: 'most_purchased', label: 'Mais comprados' },
+            { id: 'most_searched', label: 'Mais pedidos' },
             { id: 'highest_margin', label: 'Maior margem' },
             { id: 'low_stock', label: 'Estoque baixo' },
           ].map((tab) => (
@@ -371,10 +342,8 @@ export default function ProductsView({
               key={tab.id}
               type="button"
               onClick={() => setSortBy(tab.id)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${
-                sortBy === tab.id
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              className={`px-3 py-2 rounded-xl text-xs font-bold ${
+                sortBy === tab.id ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
               }`}
             >
               {tab.label}
@@ -383,187 +352,92 @@ export default function ProductsView({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-          <span className="text-[11px] font-bold uppercase text-slate-500">Custo parado</span>
-          <strong className="block text-xl tabular-nums mt-1">{formatCurrency(stock.cost)}</strong>
-        </div>
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-          <span className="text-[11px] font-bold uppercase text-slate-500">Valor de venda</span>
-          <strong className="block text-xl tabular-nums mt-1">{formatCurrency(stock.sale)}</strong>
-        </div>
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-          <span className="text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300">Estoque 0 ou 1</span>
-          <strong className="block text-xl tabular-nums mt-1">{stock.low.length}</strong>
-        </div>
-      </div>
-
       {stock.low.length > 0 && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+        <div className="rounded-2xl border border-amber-300/60 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100 flex flex-wrap gap-x-4 gap-y-1">
+          <strong className="inline-flex items-center gap-1"><AlertTriangle className="w-4 h-4" />Repor:</strong>
           {stock.low.map((product) => (
-            <span key={product.id} className="mr-3 font-semibold">
-              {product.name}: {Number(product.stock) === 0 ? 'sem estoque' : '1 unidade'}
+            <span key={product.id}>
+              {product.name} ({Number(product.stock) === 0 ? 'zerado' : '1 un'})
             </span>
           ))}
         </div>
       )}
 
       {demanded.length > 0 && (
-        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
-          <h3 className="text-sm font-extrabold mb-2">O que o cliente mais pede</h3>
-          <div className="flex flex-wrap gap-2">
-            {demanded.map((product) => (
-              <button
-                key={product.id}
-                type="button"
-                onClick={() => onIncrementSearchCount(product.id)}
-                className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800"
-              >
-                {product.name} · {product.searchCount}
-              </button>
-            ))}
-          </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-bold text-slate-500">Mais pedidos:</span>
+          {demanded.slice(0, 6).map((product) => (
+            <span key={product.id} className="px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 font-semibold">
+              {product.name} · {product.searchCount}
+            </span>
+          ))}
         </div>
       )}
 
-      {/* Lista de Cards de Produtos com Especificações Técnicas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filtered.length === 0 && (
-          <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center text-sm text-slate-500">
-            Nenhum produto cadastrado.
+          <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center text-sm text-slate-500">
+            {products.length === 0 ? 'Nenhum produto ainda. Digite um modelo acima e deixe a ficha vir pronta.' : 'Nada encontrado com esse filtro.'}
           </div>
         )}
         {filtered.map((product) => {
           const linkedSales = sales.filter((sale) => sale.productId === product.id).length;
           const unitProfit = Number(product.salePrice) - Number(product.costPrice);
-          const marginPct =
-            product.salePrice > 0 ? (unitProfit / Number(product.salePrice)) * 100 : 0;
-          const installment10x = Number(product.salePrice) / 10;
+          const marginPct = product.salePrice > 0 ? (unitProfit / Number(product.salePrice)) * 100 : 0;
+          const specs = [product.processor, product.ram, product.storage, product.screen, product.gpu].filter((item) => item && item !== 'N/A');
 
           return (
-            <div
-              key={product.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm flex flex-col justify-between hover:border-indigo-500/40 transition"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                      {product.category} • {product.sku}
-                    </span>
-                    <h3 className="font-bold text-base text-slate-900 dark:text-white mt-0.5">
-                      {product.name}
-                    </h3>
-                  </div>
-
-                  <span
-                    className={`px-2.5 py-1 text-xs font-extrabold rounded-xl shrink-0 ${
-                      product.stock === 0
-                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
-                        : product.stock <= 1
-                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                        : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                    }`}
-                  >
-                    {product.stock === 0 ? 'Sem Estoque' : `${product.stock} em estoque`}
+            <div key={product.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    {product.category} · {product.sku}
                   </span>
+                  <h3 className="font-bold text-sm leading-snug mt-0.5">{product.name}</h3>
                 </div>
+                <span
+                  className={`px-2 py-1 text-[11px] font-extrabold rounded-lg shrink-0 ${
+                    Number(product.stock) === 0
+                      ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                      : Number(product.stock) <= 1
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                  }`}
+                >
+                  {Number(product.stock) === 0 ? 'Zerado' : `${product.stock} un`}
+                </span>
+              </div>
 
-                {/* Ficha Técnica (Processador, RAM, Gigas/SSD, Tela) */}
-                {(product.processor || product.ram || product.storage || product.screen) && (
-                  <div className="mt-3 p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/25 border border-indigo-100 dark:border-indigo-900/40 space-y-1.5 text-xs">
-                    {product.processor && product.processor !== 'N/A' && (
-                      <div className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
-                        <Cpu className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                        <span className="truncate">
-                          <strong>Proc:</strong> {product.processor}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex flex-wrap items-center gap-3">
-                      {product.ram && product.ram !== 'N/A' && (
-                        <span className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-200">
-                          <Layers className="w-3.5 h-3.5 text-violet-500" />
-                          <strong>RAM:</strong> {product.ram}
-                        </span>
-                      )}
-                      {product.storage && product.storage !== 'N/A' && (
-                        <span className="inline-flex items-center gap-1 text-slate-700 dark:text-slate-200">
-                          <HardDrive className="w-3.5 h-3.5 text-emerald-500" />
-                          <strong>Gigas:</strong> {product.storage}
-                        </span>
-                      )}
-                    </div>
-                    {product.screen && product.screen !== 'N/A' && (
-                      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                        <Monitor className="w-3.5 h-3.5 text-sky-500 shrink-0" />
-                        <span className="truncate">
-                          <strong>Tela:</strong> {product.screen}
-                          {product.gpu && product.gpu !== 'N/A' ? ` • ${product.gpu}` : ''}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+              {specs.length > 0 && (
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{specs.join(' · ')}</p>
+              )}
 
-                {/* Preço, Custo e Margem */}
-                <div className="grid grid-cols-3 gap-2 my-3.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60">
-                  <div>
-                    <span className="text-[10px] uppercase text-slate-400 block">Custo Compra</span>
-                    <span className="text-xs sm:text-sm font-bold text-slate-700 dark:text-slate-300">
-                      {formatCurrency(product.costPrice)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase text-slate-400 block">Preço Venda</span>
-                    <span className="text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
-                      {formatCurrency(product.salePrice)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase text-slate-400 block">Lucro / Margem</span>
-                    <span className="text-xs sm:text-sm font-extrabold text-emerald-600 dark:text-emerald-400">
-                      {formatCurrency(unitProfit)} ({formatPercent(marginPct)})
-                    </span>
-                  </div>
+              <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 p-3 text-center">
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Custo</span>
+                  <strong className="text-xs tabular-nums">{formatCurrency(product.costPrice)}</strong>
                 </div>
-
-                <div className="text-xs text-slate-500 dark:text-slate-400 mb-3 flex items-center justify-between">
-                  <span>Sugestão Parcelado (10x):</span>
-                  <strong className="text-indigo-600 dark:text-indigo-400">
-                    10x de {formatCurrency(installment10x)}
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Venda</span>
+                  <strong className="text-xs tabular-nums">{formatCurrency(product.salePrice)}</strong>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase text-slate-500 block">Lucro</span>
+                  <strong className="text-xs tabular-nums text-emerald-700 dark:text-emerald-300">
+                    {formatCurrency(unitProfit)} · {formatPercent(marginPct)}
                   </strong>
-                </div>
-
-                {/* Indicadores: Comprados, Vendidos e Buscas */}
-                <div className="grid grid-cols-3 gap-2 text-center border-t border-b border-slate-100 dark:border-slate-800 py-2 text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Já Comprei</span>
-                    <strong className="text-slate-800 dark:text-slate-200">
-                      {product.totalPurchased} un
-                    </strong>
-                  </div>
-                  <div className="border-x border-slate-100 dark:border-slate-800">
-                    <span className="text-[10px] text-slate-400 block">Já Vendi</span>
-                    <strong className="text-indigo-600 dark:text-indigo-400">
-                      {product.totalSold} un
-                    </strong>
-                    {linkedSales > 0 && (
-                      <span className="block text-[10px] text-slate-400">{linkedSales} na planilha</span>
-                    )}
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Buscas Clientes</span>
-                    <strong className="text-rose-600 dark:text-rose-400">
-                      {product.searchCount}x
-                    </strong>
-                  </div>
                 </div>
               </div>
 
-              {/* Ações do Produto */}
-              <div className="mt-4 pt-2 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>10x de <strong className="tabular-nums text-slate-700 dark:text-slate-200">{formatCurrency(Number(product.salePrice) / 10)}</strong></span>
+                <span>
+                  {product.totalSold} vendidos{linkedSales > 0 ? ` · ${linkedSales} na planilha` : ''} · {product.searchCount} pedidos
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -571,40 +445,27 @@ export default function ProductsView({
                       setRestockQty(2);
                       setRestockCost(product.costPrice);
                     }}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 transition"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
                   >
                     <PackagePlus className="w-3.5 h-3.5" />
-                    + Compra
+                    Compra
                   </button>
-
                   <button
                     type="button"
                     onClick={() => onIncrementSearchCount(product.id)}
-                    className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-300 transition"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800"
+                    title="Cliente pediu esse produto"
                   >
                     <Flame className="w-3.5 h-3.5" />
-                    +1 Busca
+                    +1 pedido
                   </button>
                 </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => openEditModal(product)}
-                    className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
-                    title="Editar produto"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    Editar
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => openEditModal(product)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500" title="Editar">
+                    <Edit3 className="w-4 h-4" />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteProduct(product.id)}
-                    className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-bold bg-rose-500/10 hover:bg-rose-600 text-rose-600 hover:text-white dark:text-rose-400 dark:hover:text-white transition"
-                    title="Excluir produto do catálogo"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    Excluir
+                  <button type="button" onClick={() => setPendingDelete(product)} className="p-2 rounded-lg hover:bg-rose-500/10 text-rose-600" title="Excluir">
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -613,226 +474,211 @@ export default function ProductsView({
         })}
       </div>
 
-      {/* MODAL DE CADASTRO / EDIÇÃO COM AUTOPREENCHIMENTO GEMINI IA */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-2xl w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                  Ficha Técnica Automatizada com IA
-                </span>
-                <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">
-                  {editingProduct ? 'Editar Produto' : 'Novo Produto (Preenchimento Inteligente)'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="p-1.5 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/60">
+          <div className="bg-white dark:bg-slate-950 rounded-t-3xl sm:rounded-3xl max-w-3xl w-full border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[94vh] overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-white/95 dark:bg-slate-950/95 backdrop-blur px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <h3 className="font-extrabold text-lg">{editingProduct ? 'Editar produto' : 'Novo produto'}</h3>
+              <button type="button" onClick={() => setShowModal(false)} aria-label="Fechar" className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-4 mt-4">
-              {/* Campo Nome / Modelo com Botão Mágico Gemini IA Embutido */}
-              <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 space-y-2.5">
-                <label className="block text-xs font-extrabold text-indigo-900 dark:text-indigo-300">
-                  1. Digite o modelo do Notebook / Produto e clique em "Preencher com IA" *
-                </label>
+            <form onSubmit={handleSave} className="p-5 space-y-4">
+              <Section step="1" title="Qual é o produto?" hint="Nome, código de modelo, part number ou service tag. Depois clique em Buscar ficha.">
                 <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     required
                     value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    placeholder="Ex: Dell Inspiron 15 i5 16GB 512GB..."
-                    className="flex-1 px-3.5 py-2.5 text-sm font-bold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                    onChange={(event) => setForm({ ...form, name: event.target.value })}
+                    placeholder="Ex: Dell Inspiron 15 3520 i5 12ª · ou o código da etiqueta"
+                    className={`${input} font-bold`}
                   />
                   <button
                     type="button"
                     disabled={isAiLoading || !form.name.trim()}
-                    onClick={() => handleAutoFillWithGemini(form.name, false)}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 shadow-sm transition"
+                    onClick={() => runAutoFill(form.name, false)}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-xs font-bold shrink-0 disabled:opacity-50"
                   >
-                    {isAiLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-4 h-4" />
-                    )}
-                    Autopreencher com Gemini
+                    {isAiLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    Buscar ficha
                   </button>
                 </div>
 
-                {aiStatusBanner && (
-                  <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 px-3 py-2 rounded-xl">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>{aiStatusBanner}</span>
+                {isAiLoading && (
+                  <p className="mt-2 text-xs text-slate-500 inline-flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Pesquisando o modelo exato na web…
+                  </p>
+                )}
+
+                {aiResult && !isAiLoading && (
+                  <div
+                    className={`mt-3 rounded-xl border px-3 py-2.5 text-xs space-y-1.5 ${
+                      aiResult.source === 'gemini' && aiResult.confidence !== 'baixa'
+                        ? 'border-emerald-300/60 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100'
+                        : 'border-amber-300/60 bg-amber-500/10 text-amber-900 dark:text-amber-100'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-bold">
+                        {aiResult.source === 'gemini' ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                        {aiResult.source === 'gemini'
+                          ? `${aiResult.grounded ? 'Ficha da web' : 'Ficha pela memória do Gemini (sem busca na web)'} · ${confidenceLabel[aiResult.confidence] || 'Confiança média'}`
+                          : 'Busca na web falhou · preenchido por estimativa'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => runAutoFill(form.name, false)}
+                        className="inline-flex items-center gap-1 font-bold underline-offset-2 hover:underline"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Buscar de novo
+                      </button>
+                    </div>
+                    {aiResult.matchedModel && (
+                      <p>
+                        Modelo identificado: <strong>{aiResult.matchedModel}</strong>
+                      </p>
+                    )}
+                    {aiResult.variants && <p className="opacity-90">Variações: {aiResult.variants}</p>}
+                    {aiResult.source === 'gemini' && aiResult.confidence === 'baixa' && (
+                      <p>Não deu para confirmar o modelo exato. Tente o código completo da etiqueta (service tag, part number ou S/N).</p>
+                    )}
+                    {aiResult.source === 'local' && (
+                      <p className="opacity-90">
+                        Motivo: {aiResult.error}. Confira a chave da API (ícone de chave no topo) e a conexão. Os campos abaixo são um chute e precisam de revisão.
+                      </p>
+                    )}
+                    {aiResult.sources.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {aiResult.sources.map((src) => (
+                          <a
+                            key={src.uri}
+                            href={src.uri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/70 dark:bg-black/30 font-semibold truncate max-w-[14rem]"
+                            title={src.title}
+                          >
+                            <ExternalLink className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{src.title}</span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
 
-              {/* Especificações de Hardware (Preenchidas sozinhas pela IA!) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Processador / Chip
-                  </label>
-                  <input
-                    type="text"
-                    value={form.processor}
-                    onChange={(e) => setForm({ ...form, processor: e.target.value })}
-                    placeholder="Ex: Intel Core i5-1235U"
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+                  <div>
+                    <label className={labelCls}>Categoria</label>
+                    <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} className={input}>
+                      {!CATEGORIES.includes(form.category) && <option value={form.category}>{form.category}</option>}
+                      {CATEGORIES.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Estado</label>
+                    <select value={form.condition} onChange={(event) => setForm({ ...form, condition: event.target.value })} className={input}>
+                      {!CONDITIONS.includes(form.condition) && <option value={form.condition}>{form.condition}</option>}
+                      {CONDITIONS.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Código interno</label>
+                    <input type="text" value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} className={input} />
+                  </div>
                 </div>
+              </Section>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Memória RAM
-                  </label>
-                  <input
-                    type="text"
-                    value={form.ram}
-                    onChange={(e) => setForm({ ...form, ram: e.target.value })}
-                    placeholder="Ex: 16GB DDR4 3200MHz"
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+              <Section step="2" title="Ficha técnica" hint="Vem preenchida pela busca. Ajuste o que estiver diferente da máquina na sua mão.">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <SpecField icon={Cpu} label="Processador" value={form.processor} onChange={(value) => setForm({ ...form, processor: value })} placeholder="Intel Core i5-1235U" />
+                  <SpecField icon={MemoryStick} label="Memória RAM" value={form.ram} onChange={(value) => setForm({ ...form, ram: value })} placeholder="16GB DDR4 3200MHz" />
+                  <SpecField icon={HardDrive} label="Armazenamento" value={form.storage} onChange={(value) => setForm({ ...form, storage: value })} placeholder="512GB SSD NVMe" />
+                  <SpecField icon={Monitor} label="Tela" value={form.screen} onChange={(value) => setForm({ ...form, screen: value })} placeholder='15.6" Full HD 120Hz' />
+                  <div className="sm:col-span-2">
+                    <SpecField icon={Monitor} label="Placa de vídeo" value={form.gpu} onChange={(value) => setForm({ ...form, gpu: value })} placeholder="Intel Iris Xe / RTX 3050 4GB" />
+                  </div>
                 </div>
+              </Section>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Armazenamento (Gigas / SSD)
-                  </label>
-                  <input
-                    type="text"
-                    value={form.storage}
-                    onChange={(e) => setForm({ ...form, storage: e.target.value })}
-                    placeholder="Ex: 512GB SSD NVMe M.2"
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+              <Section step="3" title="Preço" hint="Custo pago e preço de venda. A margem e o parcelado aparecem na hora.">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                  <div>
+                    <label className={labelCls}>Custo (R$) *</label>
+                    <input type="number" step="0.01" min="0" required value={form.costPrice} onChange={(event) => setForm({ ...form, costPrice: event.target.value })} className={`${input} font-bold`} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Venda (R$) *</label>
+                    <input type="number" step="0.01" min="0" required value={form.salePrice} onChange={(event) => setForm({ ...form, salePrice: event.target.value })} className={`${input} font-extrabold`} />
+                  </div>
+                  <div className="col-span-2 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 text-center">
+                    <div>
+                      <span className="text-[10px] uppercase text-slate-500 block">Lucro</span>
+                      <strong className={`text-sm tabular-nums ${formProfit < 0 ? 'text-rose-600' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                        {formatCurrency(formProfit)} · {formatPercent(formMargin)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase text-slate-500 block">10x de</span>
+                      <strong className="text-sm tabular-nums">{formatCurrency(formSale / 10)}</strong>
+                    </div>
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Tela / Display
-                  </label>
-                  <input
-                    type="text"
-                    value={form.screen}
-                    onChange={(e) => setForm({ ...form, screen: e.target.value })}
-                    placeholder="Ex: 15.6 Full HD IPS"
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  <span className="text-[11px] font-bold text-slate-500 self-center">Sugerir venda:</span>
+                  {[1.4, 1.5, 1.6].map((factor) => (
+                    <button
+                      key={factor}
+                      type="button"
+                      disabled={!formCost}
+                      onClick={() => setForm({ ...form, salePrice: Math.round((formCost * factor) / 10) * 10 })}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 disabled:opacity-40"
+                    >
+                      custo +{Math.round((factor - 1) * 100)}%
+                    </button>
+                  ))}
                 </div>
+              </Section>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Placa de Vídeo / GPU
-                  </label>
-                  <input
-                    type="text"
-                    value={form.gpu}
-                    onChange={(e) => setForm({ ...form, gpu: e.target.value })}
-                    placeholder="Ex: Intel Iris Xe / RTX 3050"
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
+              <Section step="4" title="Estoque e garantia">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className={labelCls}>Em estoque</label>
+                    <input type="number" min="0" value={form.stock} onChange={(event) => setForm({ ...form, stock: event.target.value })} className={input} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Garantia (meses)</label>
+                    <input type="number" min="0" value={form.warrantyMonths} onChange={(event) => setForm({ ...form, warrantyMonths: event.target.value })} className={input} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className={labelCls}>Fornecedor</label>
+                    <input type="text" value={form.supplier} onChange={(event) => setForm({ ...form, supplier: event.target.value })} placeholder="De quem comprou" className={input} />
+                  </div>
+                  <div className="col-span-2 sm:col-span-4">
+                    <label className={labelCls}>Observações para o anúncio</label>
+                    <textarea
+                      rows={2}
+                      value={form.notes}
+                      onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                      placeholder="Pontos fortes, detalhes de uso, acessórios inclusos"
+                      className={`${input} resize-none`}
+                    />
+                  </div>
                 </div>
+              </Section>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Categoria
-                  </label>
-                  <input
-                    type="text"
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-              </div>
-
-              {/* Preços e Estoque */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Preço Custo (R$) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={form.costPrice}
-                    onChange={(e) => setForm({ ...form, costPrice: e.target.value })}
-                    className="w-full px-3 py-2 text-sm font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Preço Venda (R$) *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={form.salePrice}
-                    onChange={(e) => setForm({ ...form, salePrice: e.target.value })}
-                    className="w-full px-3 py-2 text-sm font-bold rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Estoque Atual
-                  </label>
-                  <input
-                    type="number"
-                    value={form.stock}
-                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                    Garantia (Meses)
-                  </label>
-                  <input
-                    type="number"
-                    value={form.warrantyMonths}
-                    onChange={(e) => setForm({ ...form, warrantyMonths: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                  Observações Comerciais
-                </label>
-                <input
-                  type="text"
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                >
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md"
-                >
-                  Salvar Produto no Catálogo
+                <button type="submit" className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+                  {editingProduct ? 'Salvar alterações' : 'Salvar produto'}
                 </button>
               </div>
             </form>
@@ -840,62 +686,59 @@ export default function ProductsView({
         </div>
       )}
 
-      {/* Modal de Configuração API CONEXÃO DE NOTEBOOK */}
-      {showApiKeyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-500" />
-                {DEFAULT_GEMINI_CONFIG.keyName}
-              </h3>
+      {pendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white dark:bg-slate-950 rounded-3xl max-w-sm w-full p-6 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4">
+            <h3 className="font-extrabold text-lg">Excluir {pendingDelete.name}?</h3>
+            <p className="text-sm text-slate-500">As vendas já lançadas na planilha continuam lá; só o produto sai do catálogo.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPendingDelete(null)} className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800">
+                Cancelar
+              </button>
               <button
                 type="button"
-                onClick={() => setShowApiKeyModal(false)}
-                className="p-1 text-slate-400"
+                onClick={() => {
+                  onDeleteProduct(pendingDelete.id);
+                  setPendingDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 text-white"
               >
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white dark:bg-slate-950 rounded-3xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-extrabold text-base inline-flex items-center gap-2">
+                <KeyRound className="w-4 h-4" />
+                Chave da API Gemini
+              </h3>
+              <button type="button" onClick={() => setShowApiKeyModal(false)} aria-label="Fechar" className="p-1 text-slate-400">
                 <X className="w-5 h-5" />
               </button>
             </div>
-
             <form onSubmit={handleSaveGeminiKey} className="space-y-4 mt-4">
-              <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1 text-emerald-800 dark:text-emerald-200">
-                <div>
-                  <strong>Nome:</strong> {DEFAULT_GEMINI_CONFIG.keyName}
-                </div>
-                <div>
-                  <strong>Nome do projeto:</strong> {DEFAULT_GEMINI_CONFIG.projectName}
-                </div>
-                <div>
-                  <strong>Número do projeto:</strong> {DEFAULT_GEMINI_CONFIG.projectNumber}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                  Chave de API Configurada
-                </label>
-                <input
-                  type="text"
-                  value={geminiKeyInput}
-                  onChange={(e) => setGeminiKeyInput(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                />
-              </div>
-
+              <p className="text-xs text-slate-500">
+                A busca de ficha usa o Gemini com pesquisa Google. Se a busca cair em "estimativa", gere uma chave nova em aistudio.google.com e cole aqui.
+              </p>
+              <input
+                type="password"
+                value={geminiKeyInput}
+                onChange={(event) => setGeminiKeyInput(event.target.value)}
+                className={`${input} font-mono text-xs`}
+                placeholder="Cole a chave"
+              />
               <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowApiKeyModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800"
-                >
+                <button type="button" onClick={() => setShowApiKeyModal(false)} className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800">
                   Fechar
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white"
-                >
-                  Salvar Configuração
+                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+                  Salvar
                 </button>
               </div>
             </form>
@@ -903,59 +746,28 @@ export default function ProductsView({
         </div>
       )}
 
-      {/* Modal Rápido de Registrar Compra */}
       {restockProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-xl">
-            <h3 className="font-extrabold text-lg text-slate-900 dark:text-white">
-              Registrar Nova Compra de Estoque
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Produto: <strong>{restockProduct.name}</strong>
-            </p>
-
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+          <div className="bg-white dark:bg-slate-950 rounded-3xl max-w-md w-full p-6 border border-slate-200 dark:border-slate-800 shadow-xl">
+            <h3 className="font-extrabold text-lg">Entrada de estoque</h3>
+            <p className="text-xs text-slate-500 mt-1">{restockProduct.name}</p>
             <form onSubmit={handleConfirmRestock} className="space-y-4 mt-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                  Quantidade Comprada (Unidades)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={restockQty}
-                  onChange={(e) => setRestockQty(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Quantidade</label>
+                  <input type="number" min="1" required value={restockQty} onChange={(event) => setRestockQty(event.target.value)} className={input} />
+                </div>
+                <div>
+                  <label className={labelCls}>Custo unitário (R$)</label>
+                  <input type="number" step="0.01" required value={restockCost} onChange={(event) => setRestockCost(event.target.value)} className={input} />
+                </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-1">
-                  Custo Unitário desta Compra (R$)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={restockCost}
-                  onChange={(e) => setRestockCost(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"
-                />
-              </div>
-
               <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setRestockProduct(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                >
+                <button type="button" onClick={() => setRestockProduct(null)} className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800">
                   Cancelar
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white"
-                >
-                  Confirmar Entrada (+{restockQty} un)
+                <button type="submit" className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white">
+                  Confirmar +{restockQty} un
                 </button>
               </div>
             </form>

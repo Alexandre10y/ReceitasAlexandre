@@ -1,22 +1,7 @@
 import React, { useState } from 'react';
-import {
-  Wallet,
-  TrendingUp,
-  CalendarClock,
-  ShieldAlert,
-  AlertCircle,
-  Plus,
-  MessageCircle,
-  Calculator,
-  Package,
-} from 'lucide-react';
+import { Plus, MessageCircle, ChevronDown } from 'lucide-react';
 import { formatCurrency, formatPercent, buildSaleWhatsAppUrl, localTodayISO } from '../utils/formatters';
-import {
-  PERIOD_OPTIONS,
-  computeFinance,
-  inventorySnapshot,
-  rankSalesByProduct,
-} from '../utils/finance';
+import { PERIOD_OPTIONS, computeFinance } from '../utils/finance';
 
 const monthTitle = (iso) => {
   const [year, month] = iso.split('-').map(Number);
@@ -27,44 +12,21 @@ const monthTitle = (iso) => {
   return label.charAt(0).toUpperCase() + label.slice(1);
 };
 
-function MoneyCard({ label, value, hint, tone = 'slate', children }) {
-  const tones = {
-    slate: 'text-slate-500 dark:text-slate-400',
-    emerald: 'text-emerald-700 dark:text-emerald-300',
-    amber: 'text-amber-700 dark:text-amber-300',
-    violet: 'text-violet-700 dark:text-violet-300',
-    rose: 'text-rose-700 dark:text-rose-300',
-  };
+function Stat({ label, value, hint, tone = '' }) {
   return (
-    <div className="h-full bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col">
-      <span className={`text-[11px] font-bold uppercase tracking-wider ${tones[tone]}`}>{label}</span>
-      <div className="mt-2 text-2xl sm:text-3xl font-extrabold tabular-nums text-slate-900 dark:text-white tracking-tight">
-        {value}
-      </div>
-      {hint && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{hint}</p>}
-      {children && <div className="mt-auto pt-3">{children}</div>}
+    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">{label}</span>
+      <div className={`mt-1 text-2xl font-extrabold tabular-nums tracking-tight ${tone}`}>{value}</div>
+      {hint && <p className="text-xs text-slate-500 mt-1">{hint}</p>}
     </div>
   );
 }
 
-export default function DashboardView({
-  products,
-  sales,
-  warranties,
-  onNavigate,
-  onOpenNewSale,
-  onOpenCustomer,
-}) {
+export default function DashboardView({ sales, warranties, onNavigate, onOpenNewSale, onOpenCustomer }) {
   const [period, setPeriod] = useState('all');
-  const [anticipationRate, setAnticipationRate] = useState(0);
+  const [showMore, setShowMore] = useState(false);
   const today = localTodayISO();
-  const finance = computeFinance(sales, { period, anticipationRate, warranties, asOf: today });
-  const stock = inventorySnapshot(products);
-  const ranking = rankSalesByProduct(sales).slice(0, 4);
-  const demanded = [...products]
-    .filter((product) => Number(product.searchCount) > 0)
-    .sort((a, b) => Number(b.searchCount) - Number(a.searchCount))
-    .slice(0, 4);
+  const finance = computeFinance(sales, { period, warranties, asOf: today });
   const maxMonth = Math.max(...finance.months.map((month) => month.total), 1);
   const periodLabel = PERIOD_OPTIONS.find((item) => item.id === period)?.label || 'Tudo';
 
@@ -80,105 +42,103 @@ export default function DashboardView({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+    <div className="space-y-5 max-w-5xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{monthTitle(today)}</p>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-            {finance.activePeople} {finance.activePeople === 1 ? 'pessoa ativa' : 'pessoas ativas'}
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            {finance.activePeople} {finance.activePeople === 1 ? 'pessoa pagando' : 'pessoas pagando'}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-            Entra neste mês{' '}
-            <strong className="tabular-nums">{formatCurrency(finance.thisMonth.total)}</strong>
-            {' · '}
-            Atrasado{' '}
-            <strong className="tabular-nums text-amber-700 dark:text-amber-300">
-              {formatCurrency(finance.overdue)}
-            </strong>
+            Previsto neste mês <strong className="tabular-nums">{formatCurrency(finance.thisMonth.total)}</strong>
+            {' · '}já entrou <strong className="tabular-nums">{formatCurrency(finance.thisMonth.received)}</strong>
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
+          <select
+            value={period}
+            onChange={(event) => setPeriod(event.target.value)}
+            className="px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+          >
+            {PERIOD_OPTIONS.map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={onOpenNewSale}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-sm"
+            className="lg:hidden inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-sm"
           >
             <Plus className="w-4 h-4" />
             Nova venda
           </button>
-          <button
-            type="button"
-            onClick={() => onNavigate('installments')}
-            className="px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-sm font-bold"
-          >
-            Abrir parcelas
-          </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {PERIOD_OPTIONS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setPeriod(item.id)}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold ${
-              period === item.id
-                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
-                : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <MoneyCard
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Stat
           label="Recebido"
-          tone="emerald"
           value={formatCurrency(finance.received)}
-          hint={`${periodLabel} · taxa de recebimento ${formatPercent(finance.collectionRatio * 100)}`}
+          hint={`${periodLabel} · ${formatPercent(finance.collectionRatio * 100)} do previsto`}
+          tone="text-emerald-700 dark:text-emerald-300"
         />
-        <MoneyCard
-          label="A receber"
-          value={formatCurrency(finance.open)}
-          hint={`${periodLabel} · ticket médio ${formatCurrency(finance.averageTicket)}`}
-        />
-        <MoneyCard
+        <Stat label="A receber" value={formatCurrency(finance.open)} hint={periodLabel} />
+        <Stat
           label="Atrasado"
-          tone="amber"
           value={formatCurrency(finance.overdue)}
-          hint={`${finance.overdueCount} parcelas fora do prazo, em qualquer mês`}
-        />
-        <MoneyCard
-          label="Previsto no mês"
-          tone="violet"
-          value={formatCurrency(finance.thisMonth.total)}
-          hint={`Recebido ${formatCurrency(finance.thisMonth.received)} · em aberto ${formatCurrency(finance.thisMonth.open)}`}
+          hint={`${finance.overdueCount} ${finance.overdueCount === 1 ? 'parcela vencida' : 'parcelas vencidas'}`}
+          tone="text-amber-700 dark:text-amber-300"
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-        <div className="xl:col-span-3 bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <h2 className="font-extrabold text-slate-900 dark:text-white">Caixa por mês</h2>
-              <p className="text-xs text-slate-500">Recebido e em aberto · {periodLabel}</p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-extrabold">Quem cobrar agora</h2>
+            <button type="button" onClick={() => onNavigate('installments')} className="text-xs font-bold text-slate-500 hover:underline">
+              Ver parcelas
+            </button>
+          </div>
+          {finance.debtors.length === 0 ? (
+            <p className="text-sm text-slate-500 py-6 text-center">Ninguém atrasado.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+              {finance.debtors.map((debtor) => (
+                <div key={debtor.id} className="flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+                  <button type="button" onClick={() => onOpenCustomer?.(debtor.id)} className="min-w-0 flex-1 text-left">
+                    <span className="block text-sm font-bold truncate">{debtor.customerName}</span>
+                    <span className="block text-[11px] text-slate-500 truncate">
+                      {debtor.overdueCount > 0
+                        ? `${formatCurrency(debtor.overdueSum)} vencido`
+                        : 'marcado como não pagou'}
+                      {' · '}saldo {formatCurrency(debtor.openSum)}
+                    </span>
+                  </button>
+                  <button type="button" onClick={() => openChat(debtor)} className="p-2 rounded-xl bg-emerald-600 text-white shrink-0" title="WhatsApp">
+                    <MessageCircle className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
             </div>
-            <div className="flex items-center gap-3 text-[11px] font-bold">
-              <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Recebido</span>
-              <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-slate-300 dark:bg-slate-600" /> Em aberto</span>
-            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-extrabold">Caixa por mês</h2>
+            <span className="text-[11px] font-bold text-slate-500 inline-flex items-center gap-3">
+              <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500" />Recebido</span>
+              <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-slate-300 dark:bg-slate-600" />Em aberto</span>
+            </span>
           </div>
           {finance.months.length === 0 ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Nenhuma parcela neste período.</p>
+            <p className="text-sm text-slate-500 py-6 text-center">Nenhuma parcela neste período.</p>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {finance.months.map((month) => (
-                <div key={month.ym} className="grid grid-cols-[4.8rem_1fr_5.6rem] gap-2 items-center">
+                <div key={month.ym} className="grid grid-cols-[4.5rem_1fr_5.5rem] gap-2 items-center">
                   <span className="text-[11px] font-semibold text-slate-500 capitalize">{month.label}</span>
-                  <div className="h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
                     <div className="h-full bg-emerald-500" style={{ width: `${(month.paid / maxMonth) * 100}%` }} />
                     <div className="h-full bg-slate-300 dark:bg-slate-600" style={{ width: `${(month.open / maxMonth) * 100}%` }} />
                   </div>
@@ -188,165 +148,47 @@ export default function DashboardView({
             </div>
           )}
         </div>
-
-        <div className="xl:col-span-2 bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 flex flex-col">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertCircle className="w-4 h-4 text-amber-600" />
-            <h2 className="font-extrabold text-slate-900 dark:text-white">Quem cobrar agora</h2>
-          </div>
-          {finance.debtors.length === 0 ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Nenhuma parcela atrasada.</p>
-          ) : (
-            <div className="space-y-2 overflow-y-auto max-h-80 pr-1">
-              {finance.debtors.map((debtor) => (
-                <div key={debtor.id} className="flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
-                  <button type="button" onClick={() => onOpenCustomer?.(debtor.id)} className="min-w-0 flex-1 text-left">
-                    <span className="block text-sm font-bold truncate">{debtor.customerName}</span>
-                    <span className="block text-[11px] text-slate-500 truncate">
-                      Atraso {formatCurrency(debtor.overdueSum)} · saldo {formatCurrency(debtor.openSum)}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openChat(debtor)}
-                    className="p-2 rounded-xl bg-emerald-600 text-white shrink-0"
-                    title="WhatsApp"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <MoneyCard
-          label="Lucro com custo informado"
-          tone="emerald"
-          value={finance.informed.sales > 0 ? formatCurrency(finance.informed.profit) : '—'}
-          hint={
-            finance.informed.sales > 0
-              ? `Margem ${formatPercent(finance.informed.margin)} sobre ${formatCurrency(finance.informed.revenue)}`
-              : 'Nenhuma venda deste período tem custo digitado.'
-          }
-        >
-          <p className="text-[11px] text-slate-500 border-t border-slate-100 dark:border-slate-800 pt-3">
-            Custo estimado fora deste número: {finance.estimated.sales} vendas, {formatCurrency(finance.estimated.revenue)} de receita.
-          </p>
-        </MoneyCard>
-
-        <div className="h-full bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 flex flex-col">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 inline-flex items-center gap-1">
-            <Wallet className="w-3.5 h-3.5" />
-            Se receber tudo hoje
-          </span>
-          <div className="mt-2 text-2xl sm:text-3xl font-extrabold tabular-nums">{formatCurrency(finance.netIfAllToday)}</div>
-          <p className="text-xs text-slate-500 mt-1">
-            Caixa {formatCurrency(finance.cashReceivedAll)} + a receber com desconto {formatCurrency(finance.discountedOpen)}, menos custo informado e garantias.
-          </p>
-          <div className="mt-auto pt-3">
-            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-              <span className="inline-flex items-center gap-1"><Calculator className="w-3.5 h-3.5" /> Antecipação</span>
-              <span className="font-bold">{anticipationRate === 0 ? '0% (integral)' : `${anticipationRate}% a.m.`}</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="5"
-              step="0.5"
-              value={anticipationRate}
-              onChange={(event) => setAnticipationRate(Number(event.target.value))}
-              className="w-full accent-emerald-600"
-            />
-          </div>
-        </div>
-
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
         <button
           type="button"
-          onClick={() => onNavigate('warranties')}
-          className="h-full text-left bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800"
+          onClick={() => setShowMore((value) => !value)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold"
         >
-          <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-300 inline-flex items-center gap-1">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            Garantias
-          </span>
-          <div className="mt-2 text-2xl font-extrabold tabular-nums text-rose-700 dark:text-rose-300">
-            {formatCurrency(finance.warrantyCost)}
-          </div>
-          <p className="text-xs text-slate-500 mt-1">
-            {formatPercent(finance.warrantyPercent)} da receita ({periodLabel.toLowerCase()}). Resultado do mês, depois das garantias do mês: {formatCurrency(finance.monthResult)}.
-          </p>
-          <p className="text-xs text-slate-500 mt-3 inline-flex items-center gap-1">
-            <CalendarClock className="w-3.5 h-3.5" />
-            Atraso 1–30 dias {formatCurrency(finance.aging.d1_30)} · 31–60 {formatCurrency(finance.aging.d31_60)} · 61+ {formatCurrency(finance.aging.d61)}
-          </p>
+          Resultado e detalhes
+          <ChevronDown className={`w-4 h-4 transition ${showMore ? 'rotate-180' : ''}`} />
         </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-          <h3 className="font-extrabold text-sm mb-3 inline-flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-emerald-600" />
-            Mais vendidos nas vendas
-          </h3>
-          {ranking.length === 0 ? (
-            <p className="text-sm text-slate-500">Nenhuma venda para ranquear.</p>
-          ) : (
-            <div className="space-y-2">
-              {ranking.map((item, index) => (
-                <div key={item.key} className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 px-3 py-2">
-                  <div className="min-w-0">
-                    <span className="text-[10px] font-bold text-slate-400">#{index + 1}</span>
-                    <p className="text-xs font-bold truncate">{item.name}</p>
-                    <p className="text-[11px] text-slate-500">
-                      {item.qty} un · {item.marginKnown ? `margem ${formatCurrency(item.margin)}` : 'margem sem custo informado'}
-                    </p>
-                  </div>
-                  <strong className="text-xs tabular-nums shrink-0">{formatCurrency(item.revenue)}</strong>
-                </div>
-              ))}
+        {showMore && (
+          <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <div>
+              <span className="block text-[11px] font-bold uppercase text-slate-500">Lucro com custo informado</span>
+              <strong className="block text-lg tabular-nums">
+                {finance.informed.sales > 0 ? formatCurrency(finance.informed.profit) : '—'}
+              </strong>
+              <span className="text-xs text-slate-500">
+                {finance.informed.sales > 0
+                  ? `Margem ${formatPercent(finance.informed.margin)}`
+                  : 'Nenhuma venda com custo digitado'}
+                {finance.estimated.sales > 0 ? ` · ${finance.estimated.sales} com custo estimado fora da conta` : ''}
+              </span>
             </div>
-          )}
-        </div>
-
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-          <h3 className="font-extrabold text-sm mb-3 inline-flex items-center gap-2">
-            <Package className="w-4 h-4" />
-            Estoque parado
-          </h3>
-          {products.length === 0 ? (
-            <p className="text-sm text-slate-500">Nenhum produto cadastrado.</p>
-          ) : (
-            <div className="space-y-2 text-sm">
-              <p className="flex justify-between"><span className="text-slate-500">Custo parado</span><strong className="tabular-nums">{formatCurrency(stock.cost)}</strong></p>
-              <p className="flex justify-between"><span className="text-slate-500">Valor de venda</span><strong className="tabular-nums">{formatCurrency(stock.sale)}</strong></p>
-              {stock.low.length === 0 ? (
-                <p className="text-xs text-slate-500 pt-2">Nenhum item com estoque 0 ou 1.</p>
-              ) : (
-                <div className="pt-2 space-y-1">
-                  {stock.low.map((product) => (
-                    <p key={product.id} className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-                      {product.name}: {Number(product.stock) === 0 ? 'sem estoque' : '1 unidade'}
-                    </p>
-                  ))}
-                </div>
-              )}
+            <div>
+              <span className="block text-[11px] font-bold uppercase text-slate-500">Se receber tudo hoje</span>
+              <strong className="block text-lg tabular-nums">{formatCurrency(finance.netIfAllToday)}</strong>
+              <span className="text-xs text-slate-500">Caixa + aberto, menos custo informado e garantias</span>
             </div>
-          )}
-        </div>
-
-        {demanded.length > 0 && (
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
-            <h3 className="font-extrabold text-sm mb-3">O que o cliente mais pede</h3>
-            <div className="space-y-2">
-              {demanded.map((product) => (
-                <div key={product.id} className="flex items-center justify-between text-xs">
-                  <span className="font-bold truncate pr-2">{product.name}</span>
-                  <span className="tabular-nums text-slate-500">{product.searchCount} buscas</span>
-                </div>
-              ))}
+            <div>
+              <span className="block text-[11px] font-bold uppercase text-slate-500">Garantias</span>
+              <strong className="block text-lg tabular-nums">{formatCurrency(finance.warrantyCost)}</strong>
+              <span className="text-xs text-slate-500">{formatPercent(finance.warrantyPercent)} da receita</span>
+            </div>
+            <div>
+              <span className="block text-[11px] font-bold uppercase text-slate-500">Atraso por tempo</span>
+              <strong className="block text-lg tabular-nums">{formatCurrency(finance.aging.d1_30)}</strong>
+              <span className="text-xs text-slate-500">
+                até 30 dias · 31–60: {formatCurrency(finance.aging.d31_60)} · 61+: {formatCurrency(finance.aging.d61)}
+              </span>
             </div>
           </div>
         )}
