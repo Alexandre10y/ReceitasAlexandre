@@ -1,24 +1,92 @@
 import { addMonthsToDate } from '../utils/formatters';
 
-// Gera as 12 colunas da planilha (1º P até 12º P) ou quantidade customizada
-export const buildCustomInstallments = (items, firstDueDate = '2026-04-10') => {
-  return items.map((item, idx) => {
+/** Converte "10/02" ou "26/10" → ISO com ano (padrão 2026). */
+export const paidAtFromDMY = (dmy, year = 2026) => {
+  if (!dmy) return null;
+  const [dd, mm] = String(dmy)
+    .split('/')
+    .map((p) => Number(String(p).trim()));
+  if (!dd || !mm) return null;
+  return `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+};
+
+/**
+ * Gera as colunas da planilha (1º P–12º P).
+ * Itens sem uso ficam com status 'empty' (célula "+").
+ */
+export const buildCustomInstallments = (items, firstDueDate = '2026-04-10', options = {}) => {
+  const padTo = options.padTo ?? 12;
+  const saleKey = options.saleKey || 'sale';
+
+  const list = (items || []).map((item, idx) => {
     const number = idx + 1;
-    const dueDate = addMonthsToDate(firstDueDate, idx);
+    const dueDate = item.dueDate || addMonthsToDate(firstDueDate, idx);
+    const status = item.status || 'open';
+    const paidAt =
+      status === 'paid' ? item.paidAt || dueDate : null;
     return {
-      id: `inst-${number}-${Math.random().toString(36).slice(2, 7)}`,
+      id: `${saleKey}-inst-${number}`,
       number,
       amount: Number(item.amount || 0),
       dueDate,
-      status: item.status || 'open', // 'paid' | 'open' | 'warning' | 'empty'
+      status,
       note: item.note || '',
-      paidAt: item.status === 'paid' ? dueDate : null,
+      paidAt,
     };
   });
+
+  while (list.length < padTo) {
+    const number = list.length + 1;
+    list.push({
+      id: `${saleKey}-inst-${number}`,
+      number,
+      amount: 0,
+      dueDate: addMonthsToDate(firstDueDate, number - 1),
+      status: 'empty',
+      note: '',
+      paidAt: null,
+    });
+  }
+
+  return list;
 };
 
-// IDs e SKUs dos produtos de demonstração iniciais que devem ser removidos automaticamente,
-// preservando apenas os produtos que o Alexandre cadastrou manualmente!
+const sale = ({
+  id,
+  customerName,
+  productName,
+  installmentValue,
+  firstDueDate,
+  items,
+  alertStatus = '',
+  notes = '',
+  unitCost = 0,
+}) => {
+  const active = (items || []).filter((i) => i.status !== 'empty');
+  const totalAmount = active.reduce((s, i) => s + Number(i.amount || 0), 0);
+  return {
+    id,
+    customerName,
+    customerPhone: '',
+    productId: id,
+    productName,
+    quantity: 1,
+    unitCost,
+    totalCost: unitCost,
+    totalAmount,
+    downPayment: 0,
+    paymentMethod: 'Planilha All System',
+    installmentsCount: active.length || items.length,
+    installmentValue,
+    saleDate: firstDueDate,
+    firstDueDate,
+    alertStatus,
+    notes,
+    installments: buildCustomInstallments(items, firstDueDate, { saleKey: id }),
+  };
+};
+
+// IDs/SKUs de produtos fictícios antigos — removidos automaticamente
 export const DEMO_PRODUCT_IDS = [
   'prod-1',
   'prod-2',
@@ -49,415 +117,299 @@ export const filterOutDemoProducts = (productList) => {
   );
 };
 
-// Sem produtos fictícios de teste — mantém apenas o que o Alexandre cadastrar!
 export const INITIAL_PRODUCTS = [];
 
-// Planilha Real do Alexandre importada integralmente!
-// Soma da coluna VALOR (installmentValue) = R$ 4.923,00 exatos!
+/**
+ * Planilha canônica All System — 18 pessoas · Soma VALOR = R$ 5.532,90
+ * Fonte: planilha ao vivo do Alexandre (26/10/2026)
+ */
+export const PLANILHA_SEED_VERSION = 'planilha_18_pessoas_2026_10_26';
+
 export const INITIAL_SALES = [
-  {
+  sale({
+    id: 'sale-elza-notebook',
+    customerName: 'Elza Notebook',
+    productName: 'Notebook i3 n405u',
+    installmentValue: 230,
+    firstDueDate: '2026-10-26',
+    unitCost: 900,
+    notes: '5 parcelas de R$ 230 em aberto',
+    items: Array.from({ length: 5 }, () => ({ amount: 230, status: 'open' })),
+  }),
+  sale({
+    id: 'sale-caio-imports',
+    customerName: 'Caio Imports',
+    productName: 'Caio Imports',
+    installmentValue: 49.9,
+    firstDueDate: '2026-10-26',
+    unitCost: 400,
+    notes: '12x de R$ 49,90',
+    items: Array.from({ length: 12 }, () => ({ amount: 49.9, status: 'open' })),
+  }),
+  sale({
+    id: 'sale-alipher-iphone13',
+    customerName: 'Alipher',
+    productName: 'Iphone 13 pro',
+    installmentValue: 160,
+    firstDueDate: '2026-10-26',
+    unitCost: 1200,
+    notes: '10x de R$ 160 em aberto',
+    items: Array.from({ length: 10 }, () => ({ amount: 160, status: 'open' })),
+  }),
+  sale({
     id: 'sale-bruno-roque',
     customerName: 'Bruno Roque',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Equipamento / Acordo Bruno Roque',
-    quantity: 1,
-    unitCost: 2400,
-    totalCost: 2400,
-    totalAmount: 4500,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 11,
     installmentValue: 450,
-    saleDate: '2026-01-10',
     firstDueDate: '2026-02-10',
+    unitCost: 2400,
     alertStatus: 'NÃO PAGOU MAIS',
-    notes: 'Na 10ª P consta R$ 1.800 acumulado e na 11ª P: NÃO PAGOU MAIS',
-    installments: buildCustomInstallments(
-      [
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'paid' },
-        { amount: 450, status: 'open' },
-        { amount: 450, status: 'open' },
-        { amount: 450, status: 'open' },
-        { amount: 1800, status: 'open', note: '1800' },
-        { amount: 0, status: 'warning', note: 'NÃO PAGOU MAIS' },
-      ],
-      '2026-02-10'
-    ),
-  },
-  {
-    id: 'sale-alipher',
+    notes: '10ª P R$ 1.800 · 11ª P: NÃO PAGOU MAIS',
+    items: [
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/02') },
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/03') },
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/04') },
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/05') },
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/06') },
+      { amount: 450, status: 'paid', paidAt: paidAtFromDMY('10/07') },
+      { amount: 450, status: 'open' },
+      { amount: 450, status: 'open' },
+      { amount: 450, status: 'open' },
+      { amount: 1800, status: 'open', note: '1800' },
+      { amount: 0, status: 'warning', note: 'NÃO PAGOU MAIS' },
+    ],
+  }),
+  sale({
+    id: 'sale-alipher-memoria',
     customerName: 'Alipher Not (Memoria)',
-    customerPhone: '',
-    productId: 'prod-4',
     productName: 'Notebook + Upgrade Memória RAM',
-    quantity: 1,
-    unitCost: 1950,
-    totalCost: 1950,
-    totalAmount: 3230,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 10,
     installmentValue: 320,
-    saleDate: '2026-03-10',
-    firstDueDate: '2026-04-10',
-    notes: 'Parcela base R$ 320 • 8ª P, 9ª P e 10ª P marcadas com R$ 330 cada',
-    installments: buildCustomInstallments(
-      [
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 320, status: 'paid' },
-        { amount: 330, status: 'open', note: '330' },
-        { amount: 330, status: 'open', note: '330' },
-        { amount: 330, status: 'open', note: '330' },
-      ],
-      '2026-04-10'
-    ),
-  },
-  {
+    firstDueDate: '2026-10-26',
+    unitCost: 1950,
+    notes: '1ª P paga 26/10 · 8ª–10ª P com R$ 330',
+    items: [
+      { amount: 320, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 320, status: 'open' },
+      { amount: 320, status: 'open' },
+      { amount: 320, status: 'open' },
+      { amount: 320, status: 'open' },
+      { amount: 320, status: 'open' },
+      { amount: 320, status: 'open' },
+      { amount: 330, status: 'open', note: '330' },
+      { amount: 330, status: 'open', note: '330' },
+      { amount: 330, status: 'open', note: '330' },
+    ],
+  }),
+  sale({
     id: 'sale-silvano',
     customerName: 'Silvano (Iphone 13 pro max)',
-    customerPhone: '',
-    productId: 'prod-2',
     productName: 'Apple iPhone 13 Pro Max',
-    quantity: 1,
-    unitCost: 3100,
-    totalCost: 3100,
-    totalAmount: 3980,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 7,
     installmentValue: 330,
-    saleDate: '2026-04-15',
     firstDueDate: '2026-05-15',
-    notes: 'Parcelas de R$ 330 + 7ª P de R$ 2.000,00',
-    installments: buildCustomInstallments(
-      [
-        { amount: 330, status: 'paid' },
-        { amount: 330, status: 'paid' },
-        { amount: 330, status: 'paid' },
-        { amount: 330, status: 'paid' },
-        { amount: 330, status: 'paid' },
-        { amount: 330, status: 'paid' },
-        { amount: 2000, status: 'open', note: '2000' },
-      ],
-      '2026-05-15'
-    ),
-  },
-  {
+    unitCost: 3100,
+    notes: '5 pagas · 3 em aberto de R$ 330',
+    items: [
+      { amount: 330, status: 'paid', paidAt: paidAtFromDMY('15/05') },
+      { amount: 330, status: 'paid', paidAt: paidAtFromDMY('15/06') },
+      { amount: 330, status: 'paid', paidAt: paidAtFromDMY('15/07') },
+      { amount: 330, status: 'paid', paidAt: paidAtFromDMY('15/08') },
+      { amount: 330, status: 'paid', paidAt: paidAtFromDMY('15/09') },
+      { amount: 330, status: 'open' },
+      { amount: 330, status: 'open' },
+      { amount: 330, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-igor',
     customerName: 'Igor (Iphone 11 )',
-    customerPhone: '',
-    productId: 'prod-3',
     productName: 'Apple iPhone 11',
-    quantity: 1,
-    unitCost: 1180,
-    totalCost: 1180,
-    totalAmount: 1480,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 5,
     installmentValue: 345,
-    saleDate: '2026-06-10',
     firstDueDate: '2026-07-10',
-    notes: 'Parcelas de R$ 345 + 5ª P restante de R$ 100,00',
-    installments: buildCustomInstallments(
-      [
-        { amount: 345, status: 'paid' },
-        { amount: 345, status: 'paid' },
-        { amount: 345, status: 'paid' },
-        { amount: 345, status: 'paid' },
-        { amount: 100, status: 'open', note: '100' },
-      ],
-      '2026-07-10'
-    ),
-  },
-  {
+    unitCost: 1180,
+    notes: '5ª P restante R$ 100',
+    items: [
+      { amount: 345, status: 'paid', paidAt: paidAtFromDMY('10/07') },
+      { amount: 345, status: 'paid', paidAt: paidAtFromDMY('10/08') },
+      { amount: 345, status: 'paid', paidAt: paidAtFromDMY('10/09') },
+      { amount: 345, status: 'open' },
+      { amount: 100, status: 'open', note: '100' },
+    ],
+  }),
+  sale({
     id: 'sale-hullian',
     customerName: 'Hullian',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Venda Parcelada - Hullian',
-    quantity: 1,
-    unitCost: 1800,
-    totalCost: 1800,
-    totalAmount: 3000,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 10,
     installmentValue: 300,
-    saleDate: '2026-06-15',
     firstDueDate: '2026-07-15',
-    notes: 'Valor da parcela na planilha: R$ 300,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 10 }, (_, i) => ({
-        amount: 300,
-        status: i < 4 ? 'paid' : 'open',
-      })),
-      '2026-07-15'
-    ),
-  },
-  {
+    unitCost: 1800,
+    items: [
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('15/07') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('15/08') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('15/09') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('15/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-thalisson',
     customerName: 'Thalisson',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Venda Parcelada - Thalisson',
-    quantity: 1,
-    unitCost: 1800,
-    totalCost: 1800,
-    totalAmount: 3000,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 10,
     installmentValue: 300,
-    saleDate: '2026-06-20',
     firstDueDate: '2026-07-20',
-    notes: 'Valor da parcela na planilha: R$ 300,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 10 }, (_, i) => ({
-        amount: 300,
-        status: i < 4 ? 'paid' : 'open',
-      })),
-      '2026-07-20'
-    ),
-  },
-  {
+    unitCost: 1800,
+    items: [
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('20/07') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('20/08') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('20/09') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('20/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 300, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-mario-hd',
     customerName: 'Mario HD',
-    customerPhone: '',
-    productId: 'prod-5',
     productName: 'HD / SSD Upgrade - Mario',
-    quantity: 1,
-    unitCost: 190,
-    totalCost: 190,
-    totalAmount: 400,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 4,
     installmentValue: 100,
-    saleDate: '2026-08-10',
     firstDueDate: '2026-09-10',
-    notes: 'Valor da parcela na planilha: R$ 100,00',
-    installments: buildCustomInstallments(
-      [
-        { amount: 100, status: 'paid' },
-        { amount: 100, status: 'open' },
-        { amount: 100, status: 'open' },
-        { amount: 100, status: 'open' },
-      ],
-      '2026-09-10'
-    ),
-  },
-  {
+    unitCost: 190,
+    items: [
+      { amount: 100, status: 'paid', paidAt: paidAtFromDMY('10/09') },
+      { amount: 100, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 100, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 100, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 100, status: 'paid', paidAt: paidAtFromDMY('26/10') },
+      { amount: 100, status: 'open' },
+      { amount: 100, status: 'open' },
+      { amount: 100, status: 'open' },
+      { amount: 100, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-panato',
     customerName: 'Panato',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Venda Parcelada - Panato',
-    quantity: 1,
-    unitCost: 1900,
-    totalCost: 1900,
-    totalAmount: 3100,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 10,
     installmentValue: 310,
-    saleDate: '2026-06-10',
     firstDueDate: '2026-07-10',
-    notes: 'Valor da parcela na planilha: R$ 310,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 10 }, (_, i) => ({
-        amount: 310,
-        status: i < 3 ? 'paid' : 'open',
-      })),
-      '2026-07-10'
-    ),
-  },
-  {
+    unitCost: 1900,
+    items: [
+      { amount: 310, status: 'paid', paidAt: paidAtFromDMY('10/07') },
+      { amount: 310, status: 'paid', paidAt: paidAtFromDMY('10/08') },
+      { amount: 310, status: 'paid', paidAt: paidAtFromDMY('10/09') },
+      { amount: 310, status: 'open' },
+      { amount: 310, status: 'open' },
+      { amount: 310, status: 'open' },
+      { amount: 310, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-monge',
     customerName: 'Monge Celular',
-    customerPhone: '',
-    productId: 'prod-2',
     productName: 'Celular / Equipamento - Monge',
-    quantity: 1,
-    unitCost: 2400,
-    totalCost: 2400,
-    totalAmount: 3960,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 6,
     installmentValue: 660,
-    saleDate: '2026-07-10',
     firstDueDate: '2026-08-10',
-    notes: 'Valor da parcela na planilha: R$ 660,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 6 }, (_, i) => ({
-        amount: 660,
-        status: i < 2 ? 'paid' : 'open',
-      })),
-      '2026-08-10'
-    ),
-  },
-  {
+    unitCost: 2400,
+    items: [
+      { amount: 660, status: 'paid', paidAt: paidAtFromDMY('10/08') },
+      { amount: 660, status: 'open' },
+      { amount: 660, status: 'open' },
+      { amount: 660, status: 'open' },
+      { amount: 660, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-jorge',
     customerName: 'Jorge',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Equipamentos All System - Jorge',
-    quantity: 1,
-    unitCost: 3100,
-    totalCost: 3100,
-    totalAmount: 5244,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 6,
     installmentValue: 874,
-    saleDate: '2026-07-15',
     firstDueDate: '2026-08-15',
-    notes: 'Valor da parcela na planilha: R$ 874,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 6 }, (_, i) => ({
-        amount: 874,
-        status: i < 2 ? 'paid' : 'open',
-      })),
-      '2026-08-15'
-    ),
-  },
-  {
+    unitCost: 3100,
+    items: [
+      { amount: 874, status: 'paid', paidAt: paidAtFromDMY('15/08') },
+      { amount: 874, status: 'paid', paidAt: paidAtFromDMY('15/09') },
+      { amount: 874, status: 'open' },
+      { amount: 874, status: 'open' },
+      { amount: 874, status: 'open' },
+      { amount: 874, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-thai',
     customerName: 'Thai Namorada do Mario',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Equipamento - Thai (Namorada do Mario)',
-    quantity: 1,
-    unitCost: 2100,
-    totalCost: 2100,
-    totalAmount: 3600,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 6,
     installmentValue: 600,
-    saleDate: '2026-07-20',
     firstDueDate: '2026-08-20',
-    notes: 'Valor da parcela na planilha: R$ 600,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 6 }, (_, i) => ({
-        amount: 600,
-        status: i < 2 ? 'paid' : 'open',
-      })),
-      '2026-08-20'
-    ),
-  },
-  {
+    unitCost: 2100,
+    items: [
+      { amount: 600, status: 'paid', paidAt: paidAtFromDMY('20/08') },
+      ...Array.from({ length: 9 }, () => ({ amount: 600, status: 'open' })),
+    ],
+  }),
+  sale({
     id: 'sale-tiago-violao',
     customerName: 'Tiago Violão',
-    customerPhone: '',
-    productId: 'prod-5',
     productName: 'Venda Parcelada - Tiago Violão',
-    quantity: 1,
-    unitCost: 600,
-    totalCost: 600,
-    totalAmount: 1104,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 6,
     installmentValue: 184,
-    saleDate: '2026-07-25',
     firstDueDate: '2026-08-25',
-    notes: 'Valor da parcela na planilha: R$ 184,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 6 }, (_, i) => ({
-        amount: 184,
-        status: i < 2 ? 'paid' : 'open',
-      })),
-      '2026-08-25'
-    ),
-  },
-  {
+    unitCost: 600,
+    items: [
+      { amount: 184, status: 'paid', paidAt: paidAtFromDMY('25/08') },
+      { amount: 184, status: 'paid', paidAt: paidAtFromDMY('25/09') },
+      { amount: 184, status: 'open' },
+      { amount: 184, status: 'open' },
+      { amount: 184, status: 'open' },
+    ],
+  }),
+  sale({
     id: 'sale-robert',
     customerName: 'Robert',
-    customerPhone: '',
-    productId: 'prod-5',
     productName: 'Venda Parcelada - Robert',
-    quantity: 1,
-    unitCost: 500,
-    totalCost: 500,
-    totalAmount: 900,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 6,
     installmentValue: 150,
-    saleDate: '2026-08-05',
     firstDueDate: '2026-09-05',
-    notes: 'Valor da parcela na planilha: R$ 150,00',
-    installments: buildCustomInstallments(
-      Array.from({ length: 6 }, (_, i) => ({
-        amount: 150,
-        status: i < 1 ? 'paid' : 'open',
-      })),
-      '2026-09-05'
-    ),
-  },
-  {
+    unitCost: 500,
+    alertStatus: 'NÃO PAGOU',
+    notes: '7ª coluna: NÃO PAGOU',
+    items: [
+      { amount: 150, status: 'paid', paidAt: paidAtFromDMY('05/09') },
+      { amount: 150, status: 'open' },
+      { amount: 150, status: 'open' },
+      { amount: 150, status: 'open' },
+      { amount: 150, status: 'open' },
+      { amount: 150, status: 'open' },
+      { amount: 0, status: 'warning', note: 'NÃO PAGOU' },
+    ],
+  }),
+  sale({
     id: 'sale-pesqueiro',
     customerName: 'Pesqueiro',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Conta em Aberto - Pesqueiro',
-    quantity: 1,
-    unitCost: 0,
-    totalCost: 0,
-    totalAmount: 0,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 12,
-    installmentValue: 0,
-    saleDate: '2026-10-01',
+    installmentValue: 85,
     firstDueDate: '2026-10-15',
-    notes: 'Linha da planilha aguardando definição de valor/parcelas (clique em qualquer célula para editar)',
-    installments: buildCustomInstallments(
-      Array.from({ length: 12 }, () => ({ amount: 0, status: 'empty' })),
-      '2026-10-15'
-    ),
-  },
-  {
+    unitCost: 0,
+    notes: '12x de R$ 85 em aberto',
+    items: Array.from({ length: 12 }, () => ({ amount: 85, status: 'open' })),
+  }),
+  sale({
     id: 'sale-elza',
     customerName: 'Elza',
-    customerPhone: '',
-    productId: 'prod-1',
     productName: 'Conta em Aberto - Elza',
-    quantity: 1,
-    unitCost: 0,
-    totalCost: 0,
-    totalAmount: 0,
-    downPayment: 0,
-    paymentMethod: 'Planilha All System',
-    installmentsCount: 12,
-    installmentValue: 0,
-    saleDate: '2026-10-01',
+    installmentValue: 85,
     firstDueDate: '2026-10-15',
-    notes: 'Linha da planilha aguardando definição de valor/parcelas (clique em qualquer célula para editar)',
-    installments: buildCustomInstallments(
-      Array.from({ length: 12 }, () => ({ amount: 0, status: 'empty' })),
-      '2026-10-15'
-    ),
-  },
+    unitCost: 0,
+    notes: '12x de R$ 85 em aberto',
+    items: Array.from({ length: 12 }, () => ({ amount: 85, status: 'open' })),
+  }),
 ];
 
 export const INITIAL_WARRANTIES = [
   {
     id: 'war-1',
-    productId: 'prod-4',
+    productId: 'sale-alipher-memoria',
     productName: 'Notebook + Upgrade Memória RAM',
     customerName: 'Alipher Not (Memoria)',
     date: '2026-09-18',
@@ -469,8 +421,8 @@ export const INITIAL_WARRANTIES = [
   },
   {
     id: 'war-2',
-    productId: 'prod-3',
-    productName: 'Apple iPhone 11 128GB',
+    productId: 'sale-igor',
+    productName: 'Apple iPhone 11',
     customerName: 'Igor (Iphone 11)',
     date: '2026-10-04',
     type: 'Garantia Coberta (Cabo / Carregador)',
@@ -484,42 +436,34 @@ export const INITIAL_WARRANTIES = [
 export const INITIAL_TASKS = [
   {
     id: 'task-1',
-    title: 'Verificar situação do Bruno Roque (R$ 1.800 em aberto - NÃO PAGOU MAIS)',
+    title: 'Cobrar Bruno Roque — R$ 1.800 + NÃO PAGOU MAIS',
     category: 'Cobrança',
     priority: 'alta',
-    dueDate: '2026-10-24',
-    completed: false,
-  },
-  {
-    id: 'task-2',
-    title: 'Receber 8ª parcela (R$ 330,00) do Alipher Not (Memoria)',
-    category: 'Cobrança',
-    priority: 'alta',
-    dueDate: '2026-10-25',
-    completed: false,
-  },
-  {
-    id: 'task-3',
-    title: 'Acompanhar parcela de R$ 2.000,00 do Silvano (iPhone 13 Pro Max)',
-    category: 'Financeiro',
-    priority: 'alta',
-    dueDate: '2026-10-26',
-    completed: false,
-  },
-  {
-    id: 'task-4',
-    title: 'Cobrar últimos R$ 100,00 do Igor (iPhone 11 - 5ª P)',
-    category: 'Cobrança',
-    priority: 'media',
     dueDate: '2026-10-27',
     completed: false,
   },
   {
-    id: 'task-5',
-    title: 'Atualizar valores das linhas Pesqueiro e Elza na planilha do sistema',
+    id: 'task-2',
+    title: 'Acompanhar Robert (marcação NÃO PAGOU)',
+    category: 'Cobrança',
+    priority: 'alta',
+    dueDate: '2026-10-27',
+    completed: false,
+  },
+  {
+    id: 'task-3',
+    title: 'Receber parcelas em aberto Elza Notebook / Caio / Alipher iPhone',
+    category: 'Financeiro',
+    priority: 'media',
+    dueDate: '2026-10-28',
+    completed: false,
+  },
+  {
+    id: 'task-4',
+    title: 'Conferir Pesqueiro e Elza (12x R$ 85)',
     category: 'Gestão',
     priority: 'baixa',
-    dueDate: '2026-10-28',
+    dueDate: '2026-10-30',
     completed: false,
   },
 ];

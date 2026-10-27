@@ -8,9 +8,7 @@ import {
   Sun,
   Moon,
   Plus,
-  Database,
   Mic,
-  Sparkles,
   LogOut,
   Lock,
 } from 'lucide-react';
@@ -19,13 +17,15 @@ import {
   INITIAL_SALES,
   INITIAL_WARRANTIES,
   INITIAL_TASKS,
+  PLANILHA_SEED_VERSION,
   buildCustomInstallments,
   filterOutDemoProducts,
 } from './data/initialData';
 import {
-  initFirebaseApp,
   subscribeToWorkspaceData,
   saveWorkspaceDataToCloud,
+  watchAdminAuth,
+  logoutAdmin,
 } from './services/firebaseConfig';
 import DashboardView from './components/DashboardView';
 import SalesAndInstallmentsView from './components/SalesAndInstallmentsView';
@@ -33,9 +33,10 @@ import ProductsView from './components/ProductsView';
 import WarrantyAndLossesView from './components/WarrantyAndLossesView';
 import TasksView from './components/TasksView';
 import NewSaleModal from './components/NewSaleModal';
-import FirebaseModal from './components/FirebaseModal';
 import GeminiLiveAssistant from './components/GeminiLiveAssistant';
 import AdminLoginScreen from './components/AdminLoginScreen';
+import { localTodayISO } from './utils/formatters';
+import { rebuildInstallmentsForBaseChange } from './utils/finance';
 
 const STORAGE_KEYS = {
   THEME: 'allsystem_theme_v2',
@@ -45,15 +46,12 @@ const STORAGE_KEYS = {
   WARRANTIES: 'allsystem_warranties_v2',
   TASKS: 'allsystem_tasks_v2',
   ADMIN_AUTH: 'allsystem_admin_auth_v1',
+  PLANILHA_VERSION: 'allsystem_planilha_version_v1',
 };
 
 export default function App() {
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
-    return (
-      localStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true' ||
-      sessionStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true'
-    );
-  });
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
 
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.THEME);
@@ -61,18 +59,33 @@ export default function App() {
   });
 
   const [colorScheme, setColorScheme] = useState(() => {
-    return localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME) || 'alexandre';
+    return localStorage.getItem(STORAGE_KEYS.COLOR_SCHEME) || 'padrao';
   });
 
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [customerFocus, setCustomerFocus] = useState(null);
   const [isNewSaleOpen, setIsNewSaleOpen] = useState(false);
-  const [isFirebaseModalOpen, setIsFirebaseModalOpen] = useState(false);
   const [isGeminiLiveOpen, setIsGeminiLiveOpen] = useState(false);
-  const [firebaseStatus, setFirebaseStatus] = useState(() => initFirebaseApp());
-  const [syncState, setSyncState] = useState('connecting');
-  const [syncError, setSyncError] = useState('');
+  const [, setSyncState] = useState('connecting');
+  const [, setSyncError] = useState('');
 
   const isApplyingRemoteUpdate = useRef(false);
+  // Só grava na nuvem depois que o servidor respondeu (evita guia anônima/celular sobrescreverem com dados iniciais)
+  const cloudReadyRef = useRef(false);
+  const hasAppliedServerDataRef = useRef(false);
+
+  useEffect(() => {
+    const unsub = watchAdminAuth((user) => {
+      setIsAdminAuthenticated(!!user);
+      setAuthChecking(false);
+      if (!user) {
+        cloudReadyRef.current = false;
+        hasAppliedServerDataRef.current = false;
+        setSyncState('auth_required');
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Filtra automaticamente os produtos fictícios de demonstração (prod-1..prod-6),
   // mantendo APENAS os produtos que o Alexandre cadastrou manualmente!
@@ -88,6 +101,15 @@ export default function App() {
 
   const [sales, setSales] = useState(() => {
     try {
+      const version = localStorage.getItem(STORAGE_KEYS.PLANILHA_VERSION);
+      // Garante as 18 pessoas da planilha atual (Elza Notebook, Caio, etc.)
+      if (version !== PLANILHA_SEED_VERSION) {
+        localStorage.setItem(STORAGE_KEYS.PLANILHA_VERSION, PLANILHA_SEED_VERSION);
+        localStorage.setItem(STORAGE_KEYS.SALES, JSON.stringify(INITIAL_SALES));
+        localStorage.setItem(STORAGE_KEYS.WARRANTIES, JSON.stringify(INITIAL_WARRANTIES));
+        localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(INITIAL_TASKS));
+        return INITIAL_SALES;
+      }
       const saved = localStorage.getItem(STORAGE_KEYS.SALES);
       return saved ? JSON.parse(saved) : INITIAL_SALES;
     } catch {
@@ -97,8 +119,11 @@ export default function App() {
 
   const [warranties, setWarranties] = useState(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.WARRANTIES);
-      return saved ? JSON.parse(saved) : INITIAL_WARRANTIES;
+      if (localStorage.getItem(STORAGE_KEYS.PLANILHA_VERSION) === PLANILHA_SEED_VERSION) {
+        const saved = localStorage.getItem(STORAGE_KEYS.WARRANTIES);
+        return saved ? JSON.parse(saved) : INITIAL_WARRANTIES;
+      }
+      return INITIAL_WARRANTIES;
     } catch {
       return INITIAL_WARRANTIES;
     }
@@ -106,26 +131,36 @@ export default function App() {
 
   const [tasks, setTasks] = useState(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.TASKS);
-      return saved ? JSON.parse(saved) : INITIAL_TASKS;
+      if (localStorage.getItem(STORAGE_KEYS.PLANILHA_VERSION) === PLANILHA_SEED_VERSION) {
+        const saved = localStorage.getItem(STORAGE_KEYS.TASKS);
+        return saved ? JSON.parse(saved) : INITIAL_TASKS;
+      }
+      return INITIAL_TASKS;
     } catch {
       return INITIAL_TASKS;
     }
   });
 
-  const hasInitialCloudLoadedRef = useRef(false);
+  const workspaceRef = useRef({ products, sales, warranties, tasks, colorScheme });
+  workspaceRef.current = { products, sales, warranties, tasks, colorScheme };
 
+  // Sync automático: só com admin autenticado no Firebase Auth
   useEffect(() => {
+    if (!isAdminAuthenticated) return undefined;
+
+    cloudReadyRef.current = false;
+    hasAppliedServerDataRef.current = false;
+    setSyncState('connecting');
+
     const unsubscribe = subscribeToWorkspaceData(
-      (cloudData) => {
-        // Só aplica automaticamente na carga inicial para nunca sobrescrever adições ou exclusões locais feitas pelo Alexandre
-        if (hasInitialCloudLoadedRef.current) return;
-        hasInitialCloudLoadedRef.current = true;
+      (cloudData, meta = {}) => {
+        const fromServer = !meta.fromCache && !meta.hasPendingWrites;
+        if (!fromServer && hasAppliedServerDataRef.current) return;
+        if (fromServer) hasAppliedServerDataRef.current = true;
+
         isApplyingRemoteUpdate.current = true;
         if (Array.isArray(cloudData.products)) {
-          // Remove também da nuvem qualquer produto fictício de teste (prod-1 a prod-6), mantendo só os reais do Alexandre!
-          const cleanedCloudProducts = filterOutDemoProducts(cloudData.products);
-          setProducts(cleanedCloudProducts);
+          setProducts(filterOutDemoProducts(cloudData.products));
         }
         if (Array.isArray(cloudData.sales) && cloudData.sales.length > 0) {
           setSales(cloudData.sales);
@@ -136,29 +171,34 @@ export default function App() {
         if (Array.isArray(cloudData.tasks)) {
           setTasks(cloudData.tasks);
         }
+        if (cloudData.colorScheme && typeof cloudData.colorScheme === 'string') {
+          setColorScheme(cloudData.colorScheme);
+        }
         setTimeout(() => {
           isApplyingRemoteUpdate.current = false;
-        }, 150);
+        }, 200);
       },
       (status, errMsg) => {
+        setSyncState(status);
+        if (errMsg) setSyncError(errMsg);
+
         if (status === 'empty_cloud') {
-          hasInitialCloudLoadedRef.current = true;
-          saveWorkspaceDataToCloud(
-            { products, sales, warranties, tasks, colorScheme },
-            (st, err) => {
-              setSyncState(st);
-              if (err) setSyncError(err);
-            }
-          );
-        } else {
-          setSyncState(status);
-          if (errMsg) setSyncError(errMsg);
+          cloudReadyRef.current = true;
+          saveWorkspaceDataToCloud(workspaceRef.current, (st, err) => {
+            setSyncState(st);
+            if (err) setSyncError(err);
+          });
+        } else if (status === 'synced') {
+          cloudReadyRef.current = true;
+          setSyncError('');
+        } else if (status === 'local_fallback' || status === 'offline' || status === 'auth_required') {
+          cloudReadyRef.current = false;
         }
       }
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [isAdminAuthenticated]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
@@ -167,6 +207,8 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.TASKS, JSON.stringify(tasks));
     localStorage.setItem(STORAGE_KEYS.COLOR_SCHEME, colorScheme);
 
+    // Não sobe nada até a nuvem confirmar (senão guia anônima grava planilha base por cima)
+    if (!cloudReadyRef.current) return;
     if (isApplyingRemoteUpdate.current) return;
 
     const timer = setTimeout(() => {
@@ -177,10 +219,14 @@ export default function App() {
           if (err) setSyncError(err);
         }
       );
-    }, 300);
+    }, 400);
 
     return () => clearTimeout(timer);
   }, [products, sales, warranties, tasks, colorScheme]);
+
+  useEffect(() => {
+    if (activeTab !== 'installments' && customerFocus) setCustomerFocus(null);
+  }, [activeTab, customerFocus]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -192,18 +238,8 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.THEME, darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
-  const handleForcePushToCloud = () => {
-    saveWorkspaceDataToCloud(
-      { products, sales, warranties, tasks, colorScheme },
-      (st, err) => {
-        setSyncState(st);
-        if (err) setSyncError(err);
-      }
-    );
-  };
-
   const handleToggleInstallment = (saleId, installmentNumber) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localTodayISO();
     setSales((prev) =>
       prev.map((sale) => {
         if (sale.id !== saleId) return sale;
@@ -231,7 +267,7 @@ export default function App() {
   };
 
   const handleUpdateInstallmentCell = (saleId, installmentNumber, updates) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localTodayISO();
     setSales((prev) =>
       prev.map((sale) => {
         if (sale.id !== saleId) return sale;
@@ -274,32 +310,13 @@ export default function App() {
     );
   };
 
-  const handleUpdateSaleBaseValue = (saleId, newBaseValue, count) => {
+  const handleUpdateSaleBaseValue = (saleId, newBaseValue, count, options) => {
     setSales((prev) =>
-      prev.map((sale) => {
-        if (sale.id !== saleId) return sale;
-        const newInstallments = buildCustomInstallments(
-          Array.from({ length: count }, (_, idx) => {
-            const existing = (sale.installments || [])[idx];
-            return {
-              amount: newBaseValue,
-              status:
-                existing && existing.status !== 'empty' ? existing.status : 'open',
-              note: existing?.note || '',
-            };
-          }),
-          sale.firstDueDate || '2026-10-15'
-        );
-        return {
-          ...sale,
-          installmentValue: newBaseValue,
-          baseValue: newBaseValue,
-          installmentsCount: count,
-          totalAmount: newBaseValue * count,
-          totalPrice: newBaseValue * count,
-          installments: newInstallments,
-        };
-      })
+      prev.map((sale) =>
+        sale.id === saleId
+          ? rebuildInstallmentsForBaseChange(sale, newBaseValue, count, options)
+          : sale
+      )
     );
   };
 
@@ -337,6 +354,7 @@ export default function App() {
         quantity: 1,
         unitCost: Math.round(baseVal * 6),
         totalCost: Math.round(baseVal * 6),
+        costSource: 'estimated',
         totalAmount: baseVal * 10,
         totalPrice: baseVal * 10,
         downPayment: 0,
@@ -344,8 +362,8 @@ export default function App() {
         installmentsCount: 10,
         installmentValue: baseVal,
         baseValue: baseVal,
-        saleDate: new Date().toISOString().slice(0, 10),
-        firstDueDate: new Date().toISOString().slice(0, 10),
+        saleDate: localTodayISO(),
+        firstDueDate: localTodayISO(),
         notes: 'Importado via CSV',
         installments: buildCustomInstallments(instItems),
       });
@@ -357,7 +375,7 @@ export default function App() {
   };
 
   const handleMarkAllPaid = (saleId) => {
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = localTodayISO();
     setSales((prev) =>
       prev.map((sale) => {
         if (sale.id !== saleId) return sale;
@@ -375,7 +393,7 @@ export default function App() {
 
   const handleCreateSale = (newSaleData) => {
     const rawInst = Array.isArray(newSaleData.installments) ? newSaleData.installments : [];
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = localTodayISO();
     const normalizedInstallments = rawInst.map((found, idx) => {
       const number = Number(found.number) || idx + 1;
       const status = found.status || 'open';
@@ -424,7 +442,31 @@ export default function App() {
   };
 
   const handleDeleteSale = (saleId) => {
-    setSales((prev) => prev.filter((s) => s.id !== saleId));
+    const sale = sales.find((item) => item.id === saleId);
+    if (sale?.productId) {
+      const qty = Number(sale.quantity) || 1;
+      setProducts((prev) =>
+        prev.map((product) =>
+          product.id === sale.productId
+            ? {
+                ...product,
+                stock: Number(product.stock || 0) + qty,
+                totalSold: Math.max(0, Number(product.totalSold || 0) - qty),
+              }
+            : product
+        )
+      );
+    }
+    setSales((prev) => prev.filter((item) => item.id !== saleId));
+  };
+
+  const handleUpdateSale = (saleId, updates) => {
+    setSales((prev) => prev.map((sale) => (sale.id === saleId ? { ...sale, ...updates } : sale)));
+  };
+
+  const openCustomer = (saleId, extras = {}) => {
+    setCustomerFocus({ id: saleId, ...extras });
+    setActiveTab('installments');
   };
 
   const handleQuickAddRow = (
@@ -436,7 +478,7 @@ export default function App() {
     const val = Number(String(installmentValue).replace(',', '.')) || 0;
     const count = Math.min(12, Math.max(1, Number(installmentsCount) || 1));
     const totalPrice = val * count;
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = localTodayISO();
     const dueStart = firstDueDate || todayIso;
 
     // Cria array de parcelas para buildCustomInstallments (1º P até countº P)
@@ -458,6 +500,7 @@ export default function App() {
       firstDueDate: dueStart,
       unitCost: Math.round(totalPrice * 0.65),
       totalCost: Math.round(totalPrice * 0.65),
+      costSource: 'estimated',
       totalAmount: totalPrice,
       totalPrice,
       downPayment: 0,
@@ -538,55 +581,37 @@ export default function App() {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
 
-  const handleResetDemoData = () => {
-    setProducts(INITIAL_PRODUCTS);
-    setSales(INITIAL_SALES);
-    setWarranties(INITIAL_WARRANTIES);
-    setTasks(INITIAL_TASKS);
-  };
-
-  const handleExportBackup = () => {
-    const data = {
-      company: 'All System - Alexandre Beroni',
-      exportedAt: new Date().toISOString(),
-      products,
-      sales,
-      warranties,
-      tasks,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `all-system-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleAdminLogin = (remember) => {
-    if (remember) {
-      localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
-    } else {
-      sessionStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
-    }
+  const handleAdminLogin = () => {
+    // Sessão vem do Firebase Auth (watchAdminAuth)
     setIsAdminAuthenticated(true);
   };
 
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
     localStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
     sessionStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
+    cloudReadyRef.current = false;
+    hasAppliedServerDataRef.current = false;
+    await logoutAdmin();
     setIsAdminAuthenticated(false);
+    setSyncState('auth_required');
   };
 
   const navItems = [
-    { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard },
-    { id: 'installments', label: 'Planilha (1º ao 12º P)', icon: Grid },
-    { id: 'products', label: 'Produtos + Gemini IA', icon: Package },
-    { id: 'warranties', label: 'Garantias & Perdas', icon: ShieldAlert },
-    { id: 'tasks', label: 'Tarefas Alexandre', icon: CheckSquare },
+    { id: 'dashboard', label: 'Início', icon: LayoutDashboard },
+    { id: 'installments', label: 'Parcelas', icon: Grid },
+    { id: 'products', label: 'Produtos', icon: Package },
+    { id: 'warranties', label: 'Garantias', icon: ShieldAlert },
+    { id: 'tasks', label: 'Tarefas', icon: CheckSquare },
   ];
 
-  // Proteção de Administrador para publicação segura na Vercel (Senha: ale123@)
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-300 text-sm font-semibold">
+        Carregando...
+      </div>
+    );
+  }
+
   if (!isAdminAuthenticated) {
     return (
       <AdminLoginScreen
@@ -615,23 +640,14 @@ export default function App() {
           </div>
         </div>
 
-        <div className="p-4 space-y-2">
-          <button
-            type="button"
-            onClick={() => setIsGeminiLiveOpen(true)}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-xs shadow-md transition active:scale-95"
-          >
-            <Mic className="w-4 h-4 animate-pulse" />
-            Modo Live Voz (Gemini IA)
-          </button>
-
+        <div className="p-4">
           <button
             type="button"
             onClick={() => setIsNewSaleOpen(true)}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-2xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold text-xs transition"
           >
             <Plus className="w-4 h-4 stroke-[2.5]" />
-            Lançar Nova Venda
+            Nova venda
           </button>
         </div>
 
@@ -658,22 +674,6 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
-          <button
-            type="button"
-            onClick={() => setIsFirebaseModalOpen(true)}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 transition"
-          >
-            <span className="inline-flex items-center gap-2 truncate">
-              <Database className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-              <span className="truncate">Firebase: {firebaseStatus.projectId}</span>
-            </span>
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                syncState === 'synced' ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'
-              }`}
-            />
-          </button>
-
           <button
             type="button"
             onClick={() => setDarkMode(!darkMode)}
@@ -707,7 +707,7 @@ export default function App() {
       </aside>
 
       {/* Conteúdo Principal */}
-      <div className="flex-1 lg:pl-64 flex flex-col min-h-screen pb-20 lg:pb-8">
+      <div className="flex-1 lg:pl-64 flex flex-col min-h-screen pb-32 lg:pb-8">
         <header className="sticky top-0 z-20 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="lg:hidden w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-black text-sm">
@@ -715,34 +715,22 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white leading-tight">
-                All System • Gestão Alexandre Beroni
+                All System
               </h1>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:block">
-                Acesso Administrador Protegido • Firebase ({firebaseStatus.projectId})
+                Alexandre Beroni
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Botão Modo Live Gemini no topo */}
             <button
               type="button"
-              onClick={() => setIsGeminiLiveOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white text-xs font-extrabold shadow-sm transition active:scale-95"
-              title="Abrir Modo Live por Voz do Gemini"
+              onClick={() => setIsNewSaleOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-xs font-bold"
             >
-              <Mic className="w-3.5 h-3.5" />
-              <span>Modo Live</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsFirebaseModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-xs font-bold hover:bg-emerald-500/20 transition"
-              title="Status do Firebase"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-500" />
-              <span className="hidden md:inline">Firebase OK</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Nova venda</span>
             </button>
 
             <button
@@ -767,11 +755,10 @@ export default function App() {
             <button
               type="button"
               onClick={handleAdminLogout}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-600 text-rose-600 hover:text-white dark:text-rose-400 dark:hover:text-white text-xs font-bold transition"
-              title="Bloquear tela / Sair do Administrador"
+              className="lg:hidden inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300"
+              title="Bloquear"
             >
               <Lock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Bloquear</span>
             </button>
           </div>
         </header>
@@ -782,19 +769,9 @@ export default function App() {
               products={products}
               sales={sales}
               warranties={warranties}
-              onToggleInstallment={handleToggleInstallment}
-              onUpdateInstallmentCell={handleUpdateInstallmentCell}
-              onUpdateSaleBaseValue={handleUpdateSaleBaseValue}
-              onMarkAllPaid={handleMarkAllPaid}
-              onDeleteSale={handleDeleteSale}
-              onQuickAddRow={handleQuickAddRow}
-              onIncrementSearchCount={handleIncrementSearchCount}
-              colorScheme={colorScheme}
-              onToggleColorScheme={() =>
-                setColorScheme((prev) => (prev === 'alexandre' ? 'padrao' : 'alexandre'))
-              }
               onNavigate={setActiveTab}
               onOpenNewSale={() => setIsNewSaleOpen(true)}
+              onOpenCustomer={openCustomer}
             />
           )}
 
@@ -807,18 +784,22 @@ export default function App() {
               onImportCsvRows={handleImportCsvRows}
               onMarkAllPaid={handleMarkAllPaid}
               onDeleteSale={handleDeleteSale}
+              onUpdateSale={handleUpdateSale}
               onQuickAddRow={handleQuickAddRow}
               colorScheme={colorScheme}
               onToggleColorScheme={() =>
                 setColorScheme((prev) => (prev === 'alexandre' ? 'padrao' : 'alexandre'))
               }
               onOpenNewSale={() => setIsNewSaleOpen(true)}
+              focusSale={customerFocus}
+              onFocusHandled={() => setCustomerFocus(null)}
             />
           )}
 
           {activeTab === 'products' && (
             <ProductsView
               products={products}
+              sales={sales}
               onAddProduct={handleAddProduct}
               onUpdateProduct={handleUpdateProduct}
               onDeleteProduct={handleDeleteProduct}
@@ -831,6 +812,7 @@ export default function App() {
             <WarrantyAndLossesView
               warranties={warranties}
               products={products}
+              sales={sales}
               onAddWarranty={handleAddWarranty}
               onToggleWarrantyStatus={handleToggleWarrantyStatus}
               onDeleteWarranty={handleDeleteWarranty}
@@ -854,8 +836,8 @@ export default function App() {
         onClick={() => setIsGeminiLiveOpen(true)}
         className="fixed bottom-20 lg:bottom-6 right-4 sm:right-6 z-40 inline-flex items-center gap-2.5 px-4 py-3.5 rounded-full bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-xs sm:text-sm shadow-2xl shadow-indigo-500/40 ring-2 ring-white/25 transition active:scale-95"
       >
-        <Mic className="w-4 h-4 sm:w-5 sm:h-5 animate-pulse" />
-        <span>Falar com Gemini Live</span>
+        <Mic className="w-4 h-4" />
+        <span className="hidden sm:inline">Falar</span>
       </button>
 
       {/* Barra de Navegação Inferior para Celular */}
@@ -875,8 +857,8 @@ export default function App() {
               }`}
             >
               <Icon className="w-5 h-5" />
-              <span className="text-[10px] mt-0.5 truncate max-w-[4.2rem]">
-                {item.label.split(' ')[0]}
+              <span className="text-[10px] mt-0.5 leading-tight text-center">
+                {item.label}
               </span>
             </button>
           );
@@ -889,18 +871,6 @@ export default function App() {
         onClose={() => setIsNewSaleOpen(false)}
         products={products}
         onCreateSale={handleCreateSale}
-      />
-
-      <FirebaseModal
-        isOpen={isFirebaseModalOpen}
-        onClose={() => setIsFirebaseModalOpen(false)}
-        firebaseStatus={firebaseStatus}
-        syncState={syncState}
-        syncError={syncError}
-        onFirebaseUpdated={() => setFirebaseStatus(initFirebaseApp())}
-        onForcePushToCloud={handleForcePushToCloud}
-        onResetDemoData={handleResetDemoData}
-        onExportBackup={handleExportBackup}
       />
 
       <GeminiLiveAssistant

@@ -1,0 +1,20 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All System — somente o admin autenticado. Sem acesso anônimo/público.
+    function isAllowedAdmin() {
+      return request.auth != null
+        && request.auth.token.email == 'alexandre10y@outlook.com';
+    }
+
+    match /allsystem_gestao/{documentId} {
+      allow read, write: if isAllowedAdmin()
+        && documentId == 'alexandre_beroni_main';
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

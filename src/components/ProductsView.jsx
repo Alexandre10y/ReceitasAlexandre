@@ -18,6 +18,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { formatCurrency, formatPercent } from '../utils/formatters';
+import { inventorySnapshot } from '../utils/finance';
 import {
   fetchProductSpecsWithGemini,
   PRODUCT_PROTOTYPES,
@@ -28,6 +29,7 @@ import {
 
 export default function ProductsView({
   products,
+  sales = [],
   onAddProduct,
   onUpdateProduct,
   onDeleteProduct,
@@ -221,6 +223,11 @@ export default function ProductsView({
       return 0;
     });
 
+  const stock = inventorySnapshot(products);
+  const demanded = [...products]
+    .filter((product) => Number(product.searchCount) > 0)
+    .sort((a, b) => Number(b.searchCount) - Number(a.searchCount));
+
   return (
     <div className="space-y-6">
       {/* Cabeçalho */}
@@ -332,7 +339,7 @@ export default function ProductsView({
               }}
               className="px-2.5 py-1 rounded-xl text-[11px] font-semibold bg-white/80 dark:bg-slate-800/90 hover:bg-indigo-600 hover:text-white text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition"
             >
-              ⚡ {preset}
+              {preset}
             </button>
           ))}
         </div>
@@ -354,11 +361,11 @@ export default function ProductsView({
         <div className="flex flex-wrap items-center gap-2">
           {[
             { id: 'default', label: 'Todos' },
-            { id: 'most_sold', label: '🏆 Mais Vendidos' },
-            { id: 'most_searched', label: '🔥 Mais Buscados' },
-            { id: 'most_purchased', label: '📦 Mais Comprados' },
-            { id: 'highest_margin', label: '💰 Maior Margem' },
-            { id: 'low_stock', label: '⚠️ Estoque Baixo' },
+            { id: 'most_sold', label: 'Mais vendidos' },
+            { id: 'most_searched', label: 'Mais buscados' },
+            { id: 'most_purchased', label: 'Mais comprados' },
+            { id: 'highest_margin', label: 'Maior margem' },
+            { id: 'low_stock', label: 'Estoque baixo' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -376,9 +383,58 @@ export default function ProductsView({
         </div>
       </div>
 
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+          <span className="text-[11px] font-bold uppercase text-slate-500">Custo parado</span>
+          <strong className="block text-xl tabular-nums mt-1">{formatCurrency(stock.cost)}</strong>
+        </div>
+        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+          <span className="text-[11px] font-bold uppercase text-slate-500">Valor de venda</span>
+          <strong className="block text-xl tabular-nums mt-1">{formatCurrency(stock.sale)}</strong>
+        </div>
+        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+          <span className="text-[11px] font-bold uppercase text-amber-700 dark:text-amber-300">Estoque 0 ou 1</span>
+          <strong className="block text-xl tabular-nums mt-1">{stock.low.length}</strong>
+        </div>
+      </div>
+
+      {stock.low.length > 0 && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+          {stock.low.map((product) => (
+            <span key={product.id} className="mr-3 font-semibold">
+              {product.name}: {Number(product.stock) === 0 ? 'sem estoque' : '1 unidade'}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {demanded.length > 0 && (
+        <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4">
+          <h3 className="text-sm font-extrabold mb-2">O que o cliente mais pede</h3>
+          <div className="flex flex-wrap gap-2">
+            {demanded.map((product) => (
+              <button
+                key={product.id}
+                type="button"
+                onClick={() => onIncrementSearchCount(product.id)}
+                className="px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800"
+              >
+                {product.name} · {product.searchCount}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Lista de Cards de Produtos com Especificações Técnicas */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filtered.length === 0 && (
+          <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 p-8 text-center text-sm text-slate-500">
+            Nenhum produto cadastrado.
+          </div>
+        )}
         {filtered.map((product) => {
+          const linkedSales = sales.filter((sale) => sale.productId === product.id).length;
           const unitProfit = Number(product.salePrice) - Number(product.costPrice);
           const marginPct =
             product.salePrice > 0 ? (unitProfit / Number(product.salePrice)) * 100 : 0;
@@ -404,7 +460,7 @@ export default function ProductsView({
                     className={`px-2.5 py-1 text-xs font-extrabold rounded-xl shrink-0 ${
                       product.stock === 0
                         ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
-                        : product.stock <= 2
+                        : product.stock <= 1
                         ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                         : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                     }`}
@@ -492,6 +548,9 @@ export default function ProductsView({
                     <strong className="text-indigo-600 dark:text-indigo-400">
                       {product.totalSold} un
                     </strong>
+                    {linkedSales > 0 && (
+                      <span className="block text-[10px] text-slate-400">{linkedSales} na planilha</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 block">Buscas Clientes</span>

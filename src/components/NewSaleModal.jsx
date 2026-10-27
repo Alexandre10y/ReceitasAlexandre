@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Wrench, Calendar, CheckCircle2, Loader2 } from 'lucide-react';
-import { formatCurrency, formatPercent, addMonthsToDate } from '../utils/formatters';
+import { formatCurrency, formatPercent, addMonthsToDate, localTodayISO } from '../utils/formatters';
 import { fetchProductSpecsWithGemini } from '../services/geminiService';
 
 const formatBrDate = (isoStr) => {
@@ -11,7 +11,7 @@ const formatBrDate = (isoStr) => {
 };
 
 export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localTodayISO();
   const nextMonthStr = addMonthsToDate(todayStr, 1);
 
   const [customerName, setCustomerName] = useState('');
@@ -21,6 +21,7 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
   const [selectedProductId, setSelectedProductId] = useState('');
   const [customProductName, setCustomProductName] = useState('');
   const [manualUnitCost, setManualUnitCost] = useState(0);
+  const [costTouched, setCostTouched] = useState(false);
   const [isAiFilling, setIsAiFilling] = useState(false);
 
   const [quantity, setQuantity] = useState(1);
@@ -37,15 +38,20 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
 
   // Quando o usuário escolhe um produto cadastrado no estoque, preenche automaticamente os valores
   useEffect(() => {
-    if (selectedProduct) {
-      setCustomProductName(selectedProduct.name);
-      setManualUnitCost(Number(selectedProduct.costPrice || 0));
-      const totalSuggested = Number(selectedProduct.salePrice) * Number(quantity || 1);
-      const remaining = Math.max(0, totalSuggested - Number(downPayment || 0));
-      const count = Math.max(1, Number(installmentsCount || 1));
-      setInstallmentValue(Number((remaining / count).toFixed(2)));
-    }
-  }, [selectedProductId, quantity]);
+    if (!selectedProduct) return;
+    setCustomProductName(selectedProduct.name);
+    setManualUnitCost(Number(selectedProduct.costPrice || 0));
+    setCostTouched(true);
+    setInstallmentsCount(10);
+  }, [selectedProductId]);
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+    const totalSuggested = Number(selectedProduct.salePrice) * Number(quantity || 1);
+    const remaining = Math.max(0, totalSuggested - Number(downPayment || 0));
+    const count = Math.max(1, Number(installmentsCount || 10));
+    setInstallmentValue(Number((remaining / count).toFixed(2)));
+  }, [selectedProductId, quantity, downPayment, installmentsCount]);
 
   if (!isOpen) return null;
 
@@ -78,12 +84,14 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
       ) {
         setCustomProductName(query);
         setManualUnitCost(0);
+        setCostTouched(true);
         setInstallmentsCount(2);
         setInstallmentValue(150);
       } else {
         const specs = await fetchProductSpecsWithGemini(query);
         setCustomProductName(specs.name || query);
         setManualUnitCost(Number(specs.costPrice || 0));
+        setCostTouched(true);
         const count = Math.max(1, Number(installmentsCount || 10));
         const suggestedSale = Number(specs.salePrice || 330);
         setInstallmentValue(Number((suggestedSale / count).toFixed(2)));
@@ -97,6 +105,7 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
     setSelectedProductId('');
     setCustomProductName(label);
     setManualUnitCost(cost);
+    setCostTouched(true);
     setInstallmentsCount(defaultCount);
     setInstallmentValue(Number((suggestedTotal / defaultCount).toFixed(2)));
   };
@@ -107,6 +116,7 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
     ? Number(selectedProduct.costPrice || 0)
     : Number(manualUnitCost || 0);
   const totalCost = unitCost * Number(quantity || 1);
+  const costInformed = Boolean(selectedProduct) || costTouched;
   const estimatedProfit = totalSaleAmount - totalCost;
   const estimatedMargin = totalSaleAmount > 0 ? (estimatedProfit / totalSaleAmount) * 100 : 0;
 
@@ -158,6 +168,7 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
       quantity: Number(quantity) || 1,
       unitCost,
       totalCost,
+      costSource: costInformed ? 'informed' : 'estimated',
       totalAmount: totalSaleAmount,
       totalPrice: totalSaleAmount,
       downPayment: Number(downPayment) || 0,
@@ -176,6 +187,7 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
     setCustomProductName('');
     setSelectedProductId('');
     setManualUnitCost(0);
+    setCostTouched(false);
     setNotes('');
     setAlreadyPaidCount(0);
     onClose();
@@ -309,12 +321,11 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
                   onChange={(e) => setSelectedProductId(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
                 >
-                  <option value="">
-                    ✍️ Sem selecionar produto (Digitar manual / Manutenção / Mão de Obra)
-                  </option>
+                  <option value="">Sem produto do estoque (manutenção ou avulso)</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>
-                      📦 {p.name} — {formatCurrency(p.salePrice)} (Estoque: {p.stock})
+                      {p.name} — {formatCurrency(p.salePrice)} — estoque {p.stock}
+                      {Number(p.stock) <= 1 ? ' — acabando' : ''}
                     </option>
                   ))}
                 </select>
@@ -341,7 +352,10 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
                   type="number"
                   step="0.01"
                   value={selectedProduct ? selectedProduct.costPrice : manualUnitCost}
-                  onChange={(e) => setManualUnitCost(e.target.value)}
+                  onChange={(e) => {
+                    setManualUnitCost(e.target.value);
+                    setCostTouched(true);
+                  }}
                   disabled={Boolean(selectedProduct)}
                   placeholder="0 se mão de obra"
                   className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
@@ -469,8 +483,8 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
                     key={p.number}
                     className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border ${
                       p.status === 'paid'
-                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-400/40'
-                        : 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-400/40'
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-400/40'
+                        : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-600'
                     }`}
                   >
                     <strong>{p.number}º P:</strong> {formatBrDate(p.dueDate)}{' '}
@@ -496,9 +510,13 @@ export default function NewSaleModal({ isOpen, onClose, products, onCreateSale }
               </strong>
             </div>
             <div>
-              <span className="text-[10px] uppercase text-slate-400 block">Lucro Líquido</span>
+              <span className="text-[10px] uppercase text-slate-400 block">
+                {costInformed ? 'Lucro desta venda' : 'Custo não informado'}
+              </span>
               <strong className="text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400">
-                {formatCurrency(estimatedProfit)} ({formatPercent(estimatedMargin)})
+                {costInformed
+                  ? `${formatCurrency(estimatedProfit)} (${formatPercent(estimatedMargin)})`
+                  : '—'}
               </strong>
             </div>
           </div>

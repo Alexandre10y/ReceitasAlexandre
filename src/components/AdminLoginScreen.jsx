@@ -1,19 +1,8 @@
 import React, { useState } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck, KeyRound, Sun, Moon } from 'lucide-react';
+import { loginAdminWithPassword } from '../services/firebaseConfig';
 
-const ADMIN_PASS_STORAGE_KEY = 'allsystem_admin_custom_password_v1';
-export const DEFAULT_ADMIN_PASSWORD = 'ale123@';
 export const ALLOWED_ADMIN_USERS = ['alexandre', 'admin', 'allsystem', 'alexandreberoni'];
-
-export const getConfiguredAdminPassword = () => {
-  return localStorage.getItem(ADMIN_PASS_STORAGE_KEY) || DEFAULT_ADMIN_PASSWORD;
-};
-
-export const setConfiguredAdminPassword = (newPass) => {
-  if (newPass && newPass.trim()) {
-    localStorage.setItem(ADMIN_PASS_STORAGE_KEY, newPass.trim());
-  }
-};
 
 export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDarkMode }) {
   const [username, setUsername] = useState('alexandre');
@@ -21,34 +10,48 @@ export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDar
   const [showPassword, setShowPassword] = useState(false);
   const [rememberSession, setRememberSession] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
+    setLoading(true);
 
     const cleanUser = (username || '').trim().toLowerCase();
-    const cleanPass = (password || '').trim();
-    const expectedPass = getConfiguredAdminPassword();
-
     const isValidUser =
       !cleanUser ||
       ALLOWED_ADMIN_USERS.includes(cleanUser) ||
       cleanUser.includes('alexandre') ||
       cleanUser.includes('admin');
 
-    const isValidPass =
-      cleanPass === expectedPass || cleanPass === DEFAULT_ADMIN_PASSWORD;
+    if (!isValidUser) {
+      setLoading(false);
+      setErrorMsg('Usuário administrador inválido.');
+      return;
+    }
 
-    if (isValidUser && isValidPass) {
-      onLoginSuccess(rememberSession);
-    } else {
-      setErrorMsg('Senha ou usuário incorretos. Verifique suas credenciais de Administrador.');
+    try {
+      await loginAdminWithPassword(password, rememberSession);
+      onLoginSuccess?.(rememberSession);
+    } catch (err) {
+      const code = err?.code || '';
+      const msg = String(err?.message || '');
+      if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
+        setErrorMsg('Senha ou usuário incorretos. Verifique suas credenciais.');
+      } else if (code === 'auth/too-many-requests') {
+        setErrorMsg('Muitas tentativas. Aguarde um minuto e tente de novo.');
+      } else if (code === 'auth/network-request-failed') {
+        setErrorMsg('Sem conexão com a internet. Tente novamente.');
+      } else {
+        setErrorMsg('Não foi possível entrar. Tente novamente.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col justify-center items-center p-4 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative transition-colors duration-200">
-      {/* Botão Dark/Light no canto superior direito */}
       <div className="absolute top-4 right-4">
         <button
           type="button"
@@ -76,13 +79,13 @@ export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDar
           </div>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-extrabold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
             <ShieldCheck className="w-3.5 h-3.5" />
-            Ambiente Privado • Acesso Administrador
+            Ambiente Privado • Administrador
           </span>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
             All System • Alexandre Beroni
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Sistema protegido para publicação na Vercel. Insira sua credencial de administrador para acessar a planilha e os dados financeiros.
+            Insira sua senha de administrador para acessar a planilha.
           </p>
         </div>
 
@@ -150,16 +153,17 @@ export default function AdminLoginScreen({ onLoginSuccess, darkMode, onToggleDar
 
           <button
             type="submit"
-            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-sm shadow-lg transition active:scale-95"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-extrabold text-sm shadow-lg transition active:scale-95 disabled:opacity-60"
           >
             <Lock className="w-4 h-4" />
-            Entrar como Administrador
+            {loading ? 'Entrando...' : 'Entrar como Administrador'}
           </button>
         </form>
 
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
           <p className="text-[11px] text-slate-400 dark:text-slate-500">
-            All System • Conexão Segura Firebase & Gemini IA
+            All System • Acesso exclusivo Alexandre Beroni
           </p>
         </div>
       </div>

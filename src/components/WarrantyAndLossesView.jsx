@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { ShieldAlert, Plus, CheckCircle2, Clock, Trash2, MapPin, Wrench, X } from 'lucide-react';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, formatPercent, localTodayISO } from '../utils/formatters';
+import { computeFinance } from '../utils/finance';
 
 export default function WarrantyAndLossesView({
   warranties,
   products,
+  sales = [],
   onAddWarranty,
   onToggleWarrantyStatus,
   onDeleteWarranty,
 }) {
   const [showModal, setShowModal] = useState(false);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = localTodayISO();
 
   const [form, setForm] = useState({
     productId: products[0]?.id || '',
@@ -43,6 +45,7 @@ export default function WarrantyAndLossesView({
   const totalCost = warranties.reduce((acc, w) => acc + Number(w.cost || 0), 0);
   const resolvedCount = warranties.filter((w) => w.status === 'Resolvido').length;
   const pendingCount = warranties.length - resolvedCount;
+  const finance = computeFinance(sales, { period: 'all', warranties, asOf: todayStr });
 
   return (
     <div className="space-y-6">
@@ -75,7 +78,9 @@ export default function WarrantyAndLossesView({
           <span className="text-2xl font-extrabold text-slate-900 dark:text-white mt-1 block">
             {formatCurrency(totalCost)}
           </span>
-          <span className="text-xs text-slate-500">Abatido automaticamente do lucro líquido</span>
+          <span className="text-xs text-slate-500">
+            {formatPercent(finance.warrantyPercent)} da receita ({formatCurrency(finance.gross)})
+          </span>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800">
