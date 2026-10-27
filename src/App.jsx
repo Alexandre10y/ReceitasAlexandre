@@ -141,8 +141,22 @@ export default function App() {
     }
   });
 
-  const workspaceRef = useRef({ products, sales, warranties, tasks, colorScheme });
-  workspaceRef.current = { products, sales, warranties, tasks, colorScheme };
+  const workspaceRef = useRef({
+    products,
+    sales,
+    warranties,
+    tasks,
+    colorScheme,
+    planilhaVersion: PLANILHA_SEED_VERSION,
+  });
+  workspaceRef.current = {
+    products,
+    sales,
+    warranties,
+    tasks,
+    colorScheme,
+    planilhaVersion: PLANILHA_SEED_VERSION,
+  };
 
   // Sync automático: só com admin autenticado no Firebase Auth
   useEffect(() => {
@@ -159,23 +173,40 @@ export default function App() {
         if (fromServer) hasAppliedServerDataRef.current = true;
 
         isApplyingRemoteUpdate.current = true;
-        if (Array.isArray(cloudData.products)) {
-          setProducts(filterOutDemoProducts(cloudData.products));
+        const cloudVersion = cloudData.planilhaVersion;
+        const localIsNewerSeed = cloudVersion !== PLANILHA_SEED_VERSION;
+
+        // Semente local mais nova (vencimentos 10/11) prevalece e sobe na autosave
+        if (!localIsNewerSeed) {
+          if (Array.isArray(cloudData.products)) {
+            setProducts(filterOutDemoProducts(cloudData.products));
+          }
+          if (Array.isArray(cloudData.sales) && cloudData.sales.length > 0) {
+            setSales(cloudData.sales);
+          }
+          if (Array.isArray(cloudData.warranties)) {
+            setWarranties(cloudData.warranties);
+          }
+          if (Array.isArray(cloudData.tasks)) {
+            setTasks(cloudData.tasks);
+          }
+          if (cloudData.colorScheme && typeof cloudData.colorScheme === 'string') {
+            setColorScheme(cloudData.colorScheme);
+          }
         }
-        if (Array.isArray(cloudData.sales) && cloudData.sales.length > 0) {
-          setSales(cloudData.sales);
-        }
-        if (Array.isArray(cloudData.warranties)) {
-          setWarranties(cloudData.warranties);
-        }
-        if (Array.isArray(cloudData.tasks)) {
-          setTasks(cloudData.tasks);
-        }
-        if (cloudData.colorScheme && typeof cloudData.colorScheme === 'string') {
-          setColorScheme(cloudData.colorScheme);
-        }
+
         setTimeout(() => {
           isApplyingRemoteUpdate.current = false;
+          if (localIsNewerSeed) {
+            cloudReadyRef.current = true;
+            saveWorkspaceDataToCloud(
+              { ...workspaceRef.current, planilhaVersion: PLANILHA_SEED_VERSION },
+              (st, err) => {
+                setSyncState(st);
+                if (err) setSyncError(err);
+              }
+            );
+          }
         }, 200);
       },
       (status, errMsg) => {
@@ -184,10 +215,13 @@ export default function App() {
 
         if (status === 'empty_cloud') {
           cloudReadyRef.current = true;
-          saveWorkspaceDataToCloud(workspaceRef.current, (st, err) => {
-            setSyncState(st);
-            if (err) setSyncError(err);
-          });
+          saveWorkspaceDataToCloud(
+            { ...workspaceRef.current, planilhaVersion: PLANILHA_SEED_VERSION },
+            (st, err) => {
+              setSyncState(st);
+              if (err) setSyncError(err);
+            }
+          );
         } else if (status === 'synced') {
           cloudReadyRef.current = true;
           setSyncError('');
@@ -213,7 +247,7 @@ export default function App() {
 
     const timer = setTimeout(() => {
       saveWorkspaceDataToCloud(
-        { products, sales, warranties, tasks, colorScheme },
+        { products, sales, warranties, tasks, colorScheme, planilhaVersion: PLANILHA_SEED_VERSION },
         (st, err) => {
           setSyncState(st);
           if (err) setSyncError(err);

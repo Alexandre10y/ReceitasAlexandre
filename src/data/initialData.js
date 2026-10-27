@@ -10,20 +10,41 @@ export const paidAtFromDMY = (dmy, year = 2026) => {
   return `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 };
 
+/** Próximo ciclo das parcelas em aberto (verdinho): a partir de 10/11/2026. */
+export const OPEN_INSTALLMENTS_START = '2026-11-10';
+
 /**
  * Gera as colunas da planilha (1º P–12º P).
- * Itens sem uso ficam com status 'empty' (célula "+").
+ * - Pagas (vermelho): mantêm a data em que foram pagas
+ * - Em aberto (verde): vencem a partir de 10/11 (mês a mês) — nenhuma atrasa antes disso
+ * - Alerta "NÃO PAGOU": continua como alerta (não entra no ciclo normal)
  */
-export const buildCustomInstallments = (items, firstDueDate = '2026-04-10', options = {}) => {
+export const buildCustomInstallments = (items, firstDueDate = OPEN_INSTALLMENTS_START, options = {}) => {
   const padTo = options.padTo ?? 12;
   const saleKey = options.saleKey || 'sale';
+  const openStart = options.openStart || OPEN_INSTALLMENTS_START;
+  let openIndex = 0;
 
   const list = (items || []).map((item, idx) => {
     const number = idx + 1;
-    const dueDate = item.dueDate || addMonthsToDate(firstDueDate, idx);
     const status = item.status || 'open';
-    const paidAt =
-      status === 'paid' ? item.paidAt || dueDate : null;
+    let dueDate;
+
+    if (status === 'paid') {
+      dueDate = item.paidAt || item.dueDate || addMonthsToDate(firstDueDate || openStart, idx);
+    } else if (status === 'open') {
+      // Verdinho: sempre a partir de 10/11/2026 (mês a mês)
+      dueDate = addMonthsToDate(openStart, openIndex);
+      openIndex += 1;
+    } else if (status === 'warning') {
+      // "NÃO PAGOU / NÃO PAGOU MAIS" — alerta real, fora do ciclo normal
+      dueDate = item.dueDate || openStart;
+    } else {
+      dueDate = item.dueDate || addMonthsToDate(firstDueDate || openStart, idx);
+    }
+
+    const paidAt = status === 'paid' ? item.paidAt || dueDate : null;
+
     return {
       id: `${saleKey}-inst-${number}`,
       number,
@@ -35,17 +56,19 @@ export const buildCustomInstallments = (items, firstDueDate = '2026-04-10', opti
     };
   });
 
+  let emptyOffset = 0;
   while (list.length < padTo) {
     const number = list.length + 1;
     list.push({
       id: `${saleKey}-inst-${number}`,
       number,
       amount: 0,
-      dueDate: addMonthsToDate(firstDueDate, number - 1),
+      dueDate: addMonthsToDate(openStart, openIndex + emptyOffset),
       status: 'empty',
       note: '',
       paidAt: null,
     });
+    emptyOffset += 1;
   }
 
   return list;
@@ -123,7 +146,7 @@ export const INITIAL_PRODUCTS = [];
  * Planilha canônica All System — 18 pessoas · Soma VALOR = R$ 5.532,90
  * Fonte: planilha ao vivo do Alexandre (26/10/2026)
  */
-export const PLANILHA_SEED_VERSION = 'planilha_18_pessoas_2026_10_26';
+export const PLANILHA_SEED_VERSION = 'planilha_18_vencimento_2026_11_10';
 
 export const INITIAL_SALES = [
   sale({
@@ -131,9 +154,9 @@ export const INITIAL_SALES = [
     customerName: 'Elza Notebook',
     productName: 'Notebook i3 n405u',
     installmentValue: 230,
-    firstDueDate: '2026-10-26',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 900,
-    notes: '5 parcelas de R$ 230 em aberto',
+    notes: '5 parcelas de R$ 230 em aberto — ciclo a partir de 10/11',
     items: Array.from({ length: 5 }, () => ({ amount: 230, status: 'open' })),
   }),
   sale({
@@ -141,9 +164,9 @@ export const INITIAL_SALES = [
     customerName: 'Caio Imports',
     productName: 'Caio Imports',
     installmentValue: 49.9,
-    firstDueDate: '2026-10-26',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 400,
-    notes: '12x de R$ 49,90',
+    notes: '12x de R$ 49,90 — ciclo a partir de 10/11',
     items: Array.from({ length: 12 }, () => ({ amount: 49.9, status: 'open' })),
   }),
   sale({
@@ -151,9 +174,9 @@ export const INITIAL_SALES = [
     customerName: 'Alipher',
     productName: 'Iphone 13 pro',
     installmentValue: 160,
-    firstDueDate: '2026-10-26',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 1200,
-    notes: '10x de R$ 160 em aberto',
+    notes: '10x de R$ 160 em aberto — ciclo a partir de 10/11',
     items: Array.from({ length: 10 }, () => ({ amount: 160, status: 'open' })),
   }),
   sale({
@@ -184,9 +207,9 @@ export const INITIAL_SALES = [
     customerName: 'Alipher Not (Memoria)',
     productName: 'Notebook + Upgrade Memória RAM',
     installmentValue: 320,
-    firstDueDate: '2026-10-26',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 1950,
-    notes: '1ª P paga 26/10 · 8ª–10ª P com R$ 330',
+    notes: '1ª P paga 26/10 · abertas a partir de 10/11 · 8ª–10ª P com R$ 330',
     items: [
       { amount: 320, status: 'paid', paidAt: paidAtFromDMY('26/10') },
       { amount: 320, status: 'open' },
@@ -389,9 +412,9 @@ export const INITIAL_SALES = [
     customerName: 'Pesqueiro',
     productName: 'Conta em Aberto - Pesqueiro',
     installmentValue: 85,
-    firstDueDate: '2026-10-15',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 0,
-    notes: '12x de R$ 85 em aberto',
+    notes: '12x de R$ 85 em aberto — ciclo a partir de 10/11',
     items: Array.from({ length: 12 }, () => ({ amount: 85, status: 'open' })),
   }),
   sale({
@@ -399,9 +422,9 @@ export const INITIAL_SALES = [
     customerName: 'Elza',
     productName: 'Conta em Aberto - Elza',
     installmentValue: 85,
-    firstDueDate: '2026-10-15',
+    firstDueDate: OPEN_INSTALLMENTS_START,
     unitCost: 0,
-    notes: '12x de R$ 85 em aberto',
+    notes: '12x de R$ 85 em aberto — ciclo a partir de 10/11',
     items: Array.from({ length: 12 }, () => ({ amount: 85, status: 'open' })),
   }),
 ];

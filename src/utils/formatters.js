@@ -45,7 +45,8 @@ export const localTodayISO = () => {
 };
 
 export const isOverdue = (dueDateStr, status) => {
-  if (status === 'paid' || status === 'empty') return false;
+  // Pagas, vazias e alertas manuais ("NÃO PAGOU") não entram no atraso por data
+  if (status === 'paid' || status === 'empty' || status === 'warning') return false;
   if (!dueDateStr) return false;
   return dueDateStr < localTodayISO();
 };
